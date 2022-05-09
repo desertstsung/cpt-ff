@@ -1,13 +1,13 @@
-Technical details on Compact Pt-to-pixels file format for
-satellite-based atmospherical inversion algorithms Testing
-and validation.
+Technical details on Compact Point-to-pixels file format
+for satellite-based atmospherical inversion algorithms
+Testing and validation.
 
 CPT version: 0.1
 
 File format hierarchy:
   -Header:
     -Magic number:
-       13 bytes of carefully choosen characters, which are
+       13 bytes of carefully chosen characters, which are
        {0x02, 'L', 'e', 'r', 'S', 'A', 'T', '@', 'c', 'p',
        't', '\n', 0x03}
     -Version:
@@ -15,27 +15,29 @@ File format hierarchy:
        minor version. e.g. 10000110 corresponds version 8.6
     -Count of PtPs(ns):
        2 bytes unsigned integer indicating number of PtPs,
-       which is the component of Data, described in L23.
-    -Count of params per Pt(np):
+       which is the fundamental component of Data,
+       described in L25.
+    -Count of parameters per Pt(np):
        1 byte unsigned integer indicating number of params
-       inside Pt which is one element of PtPs.
+       inside Pt, which is one element of PtPs, described
+       in L26.
   -Data: *Consists of [ns] PtPs.
     -PtPs:
-      -Pt: *Pram may be multiple according to np.
+      -Pt: *Param may be multiple according to np.
         -Geolocation:
            4 bytes single floating point number of latitude
            and 4 bytes single floating point number of
-           longitude and 2 bytes signed integer of altitude.
+           longitude and 2 bytes signed integer of altitude
         -Datetime:
-           8 bytes unsigned integer indicating seconds
+           8 bytes unsigned integer indicating the seconds
            elapsed since the Epoch(1/Jan/1970T00:00)
         -Param:
            8 bytes double floating point number.
-      -Ps: *Vicinity may be multiple according to nv(L66).
+      -Ps: *Vicinity may be multiple according to nv(L68).
         -Time difference:
            1 byte signed integer indicating minutes pass or
-           before the datetime of Pt.
-        -Pixel: *Channel may be multiple according to nc(L45).
+           before Datetime of Pt.
+        -Pixel: *Channel may be multiple due to nc(L46).
           -Geolocation:
              format like Geolocation in Pt, as well as an
              extra 1 byte unsigned integer indicating
@@ -55,7 +57,7 @@ File format hierarchy:
                number indicating observing-related values,
                e.g. DN, reflectance at TOA, or intensity,
                etc. If centre wavelength is negative, there
-               are multiple(nl) 8 bytes Q and another
+               are extra multiple(nl) 8 bytes Q and
                multiple(nl) 8 bytes U.
             -Scanning angles:
                multiple(nl) 4 bytes single floating point
