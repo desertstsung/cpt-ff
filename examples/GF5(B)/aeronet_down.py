@@ -56,7 +56,7 @@ def savetolocal(url, local):
 if 3!=len(sys.argv):usage()
 sat=xmldt(sys.argv[1])
 if not sat:
-	print("%s open failed!\nAborted.")
+	print("%s open failed!\nAborted."%(sys.argv[1]))
 	sys.exit(1)
 prod=""
 with open("aeronet_datatype.conf") as fo:prod=fo.readline()[0:7]
