@@ -37,9 +37,18 @@ int main(int argc, char *argv[]) {
 	return (3 == argc) ? wrcpt(argv[1], argv[2], argv[3]) : WR_CPT_EINVARG;
 }
 
+static querypt(const char *fname, struct cpt_pt *allpt, uint16_t *ptcount)
+{
+	
+}
+
 /*  Definition of main function  */
 int wrcpt(const char *ptname, const char *psname, const char *cptname)
 {
+	struct cpt_pt *allpt;
+	uint16_t       ptcount;
+	
+	
 	
 	return 0;
 }
