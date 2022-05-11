@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <errno.h>
 
 
 /*  Const numbers  */
@@ -59,6 +60,7 @@ struct cpt_pt {
 	uint64_t seconds;
 	void    *params;
 };
+#define CPT_PTSIZE (sizeof(struct cpt_pt))
 
 struct cpt_ptps {
 	struct cpt_pt *pt;
@@ -82,42 +84,45 @@ struct cpt_ff {
 	} while (0)
 
 time_t curtime;
-#define CPT_ECHOWITHTIME(...) \
+#define __CPT_ECHOWITHTIME(stream, ...) \
 	do { \
 		time(&curtime); \
-		printf("[%15.15s] ", ctime(&curtime)+4); \
-		printf(__VA_ARGS__); \
-		printf("\n"); \
+		fprintf(stream, "[%15.15s] ", ctime(&curtime)+4); \
+		fprintf(stream, __VA_ARGS__); \
+		fprintf(stream, "\n"); \
 	} while (0)
+#define CPT_ECHOWITHTIME(...) __CPT_ECHOWITHTIME(stdout, __VA_ARGS__)
 
 
-/*  Error handle  */
-#define CPT_ERRLOC fprintf(stderr, "File: %s, fn: %s, ln: %d\n", __FILE__, __FUNCTION__, __LINE__)
+/*  Error prompt  */
+#define CPT_ERRLOC fprintf(stderr, "File: %s, Fn: %s, Ln: %d\n", __FILE__, __FUNCTION__, __LINE__)
+
+#define CPT_ERRECHOWITHTIME(...) __CPT_ECHOWITHTIME(stderr, __VA_ARGS__)
 
 #define CPT_ERROPEN(fname) \
 	do { \
-		fprintf(stderr, "ERROR %d %s: %s\n", errno, strerr(errno), fname); \
+		CPT_ERRECHOWITHTIME("ERROR %d %s: %s\n", errno, strerror(errno), fname); \
 		CPT_ERRLOC; \
 	} while (0)
 
 #define CPT_ERRFIO(fd) \
 	do { \
 		close(fd); \
-		fprintf(stderr, "ERROR %d %s\n", errno, strerr(errno)); \
+		CPT_ERRECHOWITHTIME("ERROR %d %s\n", errno, strerror(errno)); \
 		CPT_ERRLOC; \
 	} while (0)
 
 #define CPT_ERRFIO(fd) \
 	do { \
 		close(fd); \
-		fprintf(stderr, "ERROR %d %s\n", errno, strerr(errno)); \
+		CPT_ERRECHOWITHTIME("ERROR %d %s\n", errno, strerror(errno)); \
 		CPT_ERRLOC; \
 	} while (0)
 
-#define CPT_ERRMEM(...) \
+#define CPT_ERRMEM(ptr) \
 	do { \
-		cpt_freethemall(__VA_ARGS__); \
-		fprintf(stderr, "MEM PANIC %d %s\n", errno, strerr(errno)); \
+		CPT_FREE(ptr); \
+		CPT_ERRECHOWITHTIME("MEM PANIC %d %s\n", errno, strerror(errno)); \
 		CPT_ERRLOC; \
 	} while (0)
 
