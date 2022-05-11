@@ -36,6 +36,7 @@ WR_CPT_EINVARG = 1,
 WR_CPT_EOPEN,
 WR_CPT_EINVSITE,
 WR_CPT_EMEM,
+WR_CPT_ENORCD,
 WR_CPT_E
 };
 
@@ -79,13 +80,62 @@ static int cpt_freethemall(uint8_t n, ...)
  */
 static int cpt_freeptall(struct cpt_pt **p, uint16_t n)
 {
-	while (n-- > 0)
-		CPT_FREE((*p+n)->params);
-	CPT_FREE(*p);
+	if (*p) {
+		while (n-- > 0)
+			CPT_FREE((*p+n)->params);
+		CPT_FREE(*p);
+	}
 	
 	return 0;
 }
 
+/*TODO move this fn to read/ dir
+ *  Free one or more cpt_channel st pointer
+ */
+static int cpt_freechannelall(struct cpt_channel **p, uint16_t n)
+{
+	if (*p) {
+		while (n-- > 0)
+			cpt_freethemall(2, &(*p+n)->obs, &(*p+n)->ang);
+		CPT_FREE(*p);
+	}
+	
+	return 0;
+}
+
+/*TODO move this fn to read/ dir
+ *  Free one or more cpt_pixel st pointer
+ */
+static int cpt_freepixelall(struct cpt_pixel **p, uint16_t n)
+{
+	if (*p) {
+		while (n-- > 0)
+			cpt_freechannelall(&(*p+n)->channels, (*p+n)->nchannel);
+		CPT_FREE(*p);
+	}
+	
+	return 0;
+}
+
+/*TODO move this fn to read/ dir
+ *  Free one or more cpt_ps st pointer
+ */
+static int cpt_freepsall(struct cpt_ps **p, uint16_t n)
+{
+	if (*p) {
+		while (n-- > 0) {
+			cpt_freepixelall(&(*p+n)->centrepixel, 1);
+			cpt_freepixelall(&(*p+n)->vicinity, (*p+n)->nvicinity);
+		}
+		CPT_FREE(*p);
+	}
+	
+	return 0;
+}
+
+/*
+ *  Load site info into cpt_pt st
+ */
 static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
 {
 	int      fd;
@@ -202,12 +252,22 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
 /*  Definition of main function  */
 int wrcpt(const char *ptname, const char *psname, const char *cptname)
 {
-	struct cpt_pt *allpt;
 	int            ret;
 	uint16_t       ptcount;
+	struct cpt_pt *allpt;
+	struct cpt_ps *allps;
 	
-	if (ret = querypt(ptname, &allpt, &ptcount))
+	if (ret = querypt(ptname, &allpt, &ptcount)) {
+		cpt_freeptall(&allpt, ptcount);
 		return ret;
+	}
+	
+	if (ptcount) {
+		allps = malloc(CPT_PSSIZE*ptcount);
+	} else {
+		cpt_freeptall(&allpt, ptcount);
+		return WR_CPT_ENORCD;
+	}
 	
 	/*  Cleanup  */
 	ret = cpt_freeptall(&allpt, ptcount);

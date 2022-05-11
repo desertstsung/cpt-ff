@@ -32,8 +32,8 @@ struct cpt_header {
 
 struct cpt_channel {
 	int16_t centrewv;
-	void   *obs;
-	void   *ang;
+	double  *obs;
+	double  *ang;
 };
 
 struct cpt_pixel {
@@ -52,6 +52,7 @@ struct cpt_ps {
 	struct  cpt_pixel *centrepixel;
 	struct  cpt_pixel *vicinity;
 };
+#define CPT_PSSIZE (sizeof(struct cpt_ps))
 
 struct cpt_pt {
 	int16_t  alt;
