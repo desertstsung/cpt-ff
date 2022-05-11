@@ -1,7 +1,7 @@
 /*
  *file: read/readcpt.h
  *init date: May/10/2022
- *last modify: May/10/2022
+ *last modify: May/11/2022
  *
  */
 
@@ -58,7 +58,7 @@ struct cpt_pt {
 	float    lat;
 	float    lon;
 	uint64_t seconds;
-	void    *params;
+	double  *params;
 };
 #define CPT_PTSIZE (sizeof(struct cpt_pt))
 
