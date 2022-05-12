@@ -52,6 +52,10 @@
 #define WR_CPT_XMLENDTAG   "</ProductMetaData>"
 #define WR_CPT_XMLSTTAG    "StartTime"
 #define WR_CPT_XMLETTAG    "EndTime"
+#define WR_CPT_XMLLATTAG   "NadirLat"
+#define WR_CPT_XMLLONTAG   "NadirLong"
+#define WR_CPT_XMLNRTAG    "LineCount"
+#define WR_CPT_XMLNCTAG    "SampleCount"
 
 struct wr_cpt_posp {
 	hid_t iid;   /*  entrance of intensity    */
@@ -288,8 +292,6 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
 		snprintf(rcddt, WR_CPT_DTLEN, "%s,%s", rcddate, rcdtime);
 		strptime(rcddt, "%d:%m:%Y,%H:%M:%S", stm);
 		ppt->seconds = mktime(stm);
-		printf("Time: %s Sec: %lld Lat: %f Lon: %f Alt:%hd AOD500: %lf \n",
-		       rcddt, ppt->seconds, ppt->lat,ppt->lon,ppt->alt,ppt->params[4]);
 		
 		pprev = ++pbuf;
 	} while (*pbuf != '\0');
@@ -362,23 +364,23 @@ static int pospsethyper(struct wr_cpt_posp *st, uint16_t ir, uint16_t ic)
 
 static int pospinfoinit(const char *fname, struct wr_cpt_posp *pospst)
 {
-	char  *xmlfname;
-	size_t len;
 	int      fd;
 	char    *buffer, *pbuf, *pprev, *line, *pline;
+	char    *xmlfname;
 	char     dtbeg[WR_CPT_DTLEN], dtend[WR_CPT_DTLEN];
+	size_t   xmlnlen;
 	uint32_t flen, llen, maxlen;
 	struct tm *stm;
 	
-	xmlfname = malloc(len = strlen(fname)-1);
-	len -= WR_CPT_XMLSUFLEN;
+	xmlfname = malloc(xmlnlen = strlen(fname)-1);
+	xmlnlen -= WR_CPT_XMLSUFLEN;
 	
-	memcpy(xmlfname, fname, len);
-	memcpy(xmlfname+len, WR_CPT_XMLSUFFIX, WR_CPT_XMLSUFLEN);
+	memcpy(xmlfname, fname, xmlnlen);
+	memcpy(xmlfname+xmlnlen, WR_CPT_XMLSUFFIX, WR_CPT_XMLSUFLEN);
 	
 	/*  Try openning text file  */
-	if ((fd = open(fname, O_RDONLY)) < 0) {
-		CPT_ERROPEN(fname);
+	if ((fd = open(xmlfname, O_RDONLY)) < 0) {
+		CPT_ERROPEN(xmlfname);
 		return WR_CPT_EOPEN;
 	}
 	
@@ -404,18 +406,57 @@ static int pospinfoinit(const char *fname, struct wr_cpt_posp *pospst)
 		if (llen > maxlen) {
 			maxlen = llen;
 			line = realloc(line, sizeof(char[llen]));
+		} else {
+			memset(line+llen, 0, maxlen-llen);
 		}
 		memcpy(line, pprev, llen);
 		
-		/*  End of records  */
+		/*  End of XML  */
 		if (pline = strstr(line, WR_CPT_XMLENDTAG)) break;
 		
-		snprintf(rcddt, WR_CPT_DTLEN, "%s,%s", rcddate, rcdtime);
-		strptime(rcddt, "%d:%m:%Y,%H:%M:%S", stm);
-		ppt->seconds = mktime(stm);
-		printf("Time: %s Sec: %lld Lat: %f Lon: %f Alt:%hd AOD500: %lf \n",
-		       rcddt, ppt->seconds, ppt->lat,ppt->lon,ppt->alt,ppt->params[4]);
+		/*  Start time  */
+		if (pline = strstr(line, WR_CPT_XMLSTTAG)) {
+			sscanf(pline, "%*[^'>']>%[^'<']", dtbeg);
+			strptime(dtbeg, "%Y-%m-%d %H:%M:%S", stm);
+			pospst->secswhenscan = mktime(stm);
+			goto next_line;
+		}
 		
+		/*  Ending time  */
+		if (pline = strstr(line, WR_CPT_XMLETTAG)) {
+			sscanf(pline, "%*[^'>']>%[^'<']", dtbeg);
+			strptime(dtbeg, "%Y-%m-%d %H:%M:%S", stm);
+			pospst->secsperline = mktime(stm) - pospst->secswhenscan;
+			goto next_line;
+		}
+		
+		/*  Longitude bounds  */
+		if (pline = strstr(line, WR_CPT_XMLLONTAG)) {
+			//TODO
+			goto next_line;
+		}
+		
+		/*  Latitude bounds  */
+		if (pline = strstr(line, WR_CPT_XMLLATTAG)) {
+			//TODO
+			goto next_line;
+		}
+		
+		/*  N of row  */
+		if (pline = strstr(line, WR_CPT_XMLNRTAG)) {
+			sscanf(pline, "%*[^'>']>%hu", &pospst->nrow);
+			pospst->secsperline /= pospst->nrow;
+			if (!pospst->secsperline) pospst->secsperline = 1;
+			goto next_line;
+		}
+		
+		/*  N of col  */
+		if (pline = strstr(line, WR_CPT_XMLNCTAG)) {
+			sscanf(pline, "%*[^'>']>%hu", &pospst->ncol);
+			goto next_line;
+		}
+		
+		next_line:
 		pprev = ++pbuf;
 	} while (*pbuf != '\0');
 	
@@ -480,9 +521,12 @@ int wrcpt(const char *ptname, const char *psname, const char *cptname)
 	
 	pospst = malloc(sizeof(struct wr_cpt_posp));
 	pospinfoinit(psname, pospst);
+	pospopenall(psname, pospst);
+	printf("%hd\n", pospst->secsperline);
 	
 	/*  Cleanup  */
 	ret = cpt_freeptall(&allpt, ptcount);
+	ret = pospcleanst(&pospst);
 	
 	return 0;
 }
