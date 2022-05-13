@@ -7,7 +7,7 @@
  *  [2]: DPC/POSP data file
  *  [3]: output cpt
  *init date: May/10/2022
- *last modify: May/12/2022
+ *last modify: May/13/2022
  *
  */
 
@@ -38,8 +38,8 @@
 #define WR_CPT_POSPINAME   "I"
 #define WR_CPT_POSPQNAME   "Q"
 #define WR_CPT_POSPUNAME   "U"
-#define WR_CPT_POSPLATNAME "Latitude"
 #define WR_CPT_POSPLONNAME "Longitude"
+#define WR_CPT_POSPLATNAME "Latitude"
 #define WR_CPT_POSPSLNAME  "Sea_Land_Flags"
 #define WR_CPT_POSPALTNAME "Surface_Altitude"
 #define WR_CPT_POSPSZNAME  "Sol_Zen_Ang"
@@ -52,10 +52,18 @@
 #define WR_CPT_XMLENDTAG   "</ProductMetaData>"
 #define WR_CPT_XMLSTTAG    "StartTime"
 #define WR_CPT_XMLETTAG    "EndTime"
-#define WR_CPT_XMLLATTAG   "NadirLat"
 #define WR_CPT_XMLLONTAG   "NadirLong"
+#define WR_CPT_XMLLATTAG   "NadirLat"
 #define WR_CPT_XMLNRTAG    "LineCount"
 #define WR_CPT_XMLNCTAG    "SampleCount"
+
+#define WR_CPT_LONLIM_MIN  -180
+#define WR_CPT_LONLIM_MAX  180
+#define WR_CPT_LATLIM_MIN  -90
+#define WR_CPT_LATLIM_MAX  90
+
+#define WR_CPT_INVALIDLON(lon) ((lon < WR_CPT_LONLIM_MIN) || (lon > WR_CPT_LONLIM_MAX))
+#define WR_CPT_INVALIDLAT(lat) ((lat < WR_CPT_LATLIM_MIN) || (lat > WR_CPT_LATLIM_MAX))
 
 struct wr_cpt_posp {
 	hid_t iid;   /*  entrance of intensity    */
@@ -80,12 +88,13 @@ struct wr_cpt_posp {
 	hsize_t l2id[2];  /*  2-d hyper len  */
 	hsize_t l3id[3];  /*  3-d hyper len  */
 	
-	uint16_t ncol;  /*  count of col  */
-	uint16_t nrow;  /*  count of row  */
+	uint16_t ncol, nrow;    /*  count of row/col    */
 	uint16_t secsperline;   /*  timelapse per line  */
 	uint64_t secswhenscan;  /*  timestamp of begin  */
-	double *lat;  /*  full lat  */
-	double *lon;  /*  full lon  */
+	double  *lon, *lat;     /*  full lon/lat        */
+	
+	float lonmin, latmin;   /*  left bottom pixel   */
+	float lonmax, latmax;   /*  right top pixel     */
 };
 
 
@@ -196,11 +205,13 @@ static int cpt_freepsall(struct cpt_ps **p, uint16_t n)
 /*
  *  Load site info into cpt_pt st
  */
-static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
+static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount,
+                   uint16_t **uid, uint16_t *ucount)
 {
 	int      fd;
 	char    *buffer, *pbuf, *pprev, *line;
 	char     rcddate[WR_CPT_DATELEN], rcdtime[WR_CPT_TIMELEN], rcddt[WR_CPT_DTLEN];
+	float    prevlon, prevlat;
 	uint32_t flen, llen, maxlen;
 	struct cpt_pt *ppt;
 	struct tm     *stm;
@@ -238,7 +249,11 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
 	stm    = malloc(sizeof(struct tm));
 	line   = malloc(1);
 	maxlen = 1;
+	prevlon = WR_CPT_LONLIM_MAX+1;
+	prevlat = WR_CPT_LATLIM_MAX+1;
+	*uid     = malloc(1);
 	*allpt   = malloc(1);
+	*ucount  = 0;
 	*ptcount = 0;
 	
 	/*  Handle each line  */
@@ -246,10 +261,8 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
 		while (*++pbuf != '\n') ;
 		
 		llen = pbuf-pprev;
-		if (llen > maxlen) {
-			maxlen = llen;
-			line = realloc(line, sizeof(char[llen]));
-		}
+		if (llen > maxlen)
+			line = realloc(line, sizeof(char[maxlen = llen]));
 		memcpy(line, pprev, llen);
 		
 		/*  End of records  */
@@ -293,6 +306,13 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
 		strptime(rcddt, "%d:%m:%Y,%H:%M:%S", stm);
 		ppt->seconds = mktime(stm);
 		
+		if ((ppt->lon != prevlon) && (ppt->lat != prevlat)) {
+			prevlon = ppt->lon;
+			prevlat = ppt->lat;
+			*uid = realloc(*uid, sizeof(int16_t[++*ucount]));
+			(*uid)[*ucount-1] = *ptcount-1;
+		}
+		
 		pprev = ++pbuf;
 	} while (*pbuf != '\0');
 	
@@ -310,9 +330,9 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
 /*  Init st from POSP h5  */
 static int pospopenall(const char *fname, struct wr_cpt_posp *st)
 {
-	hid_t   latid, lonid;
-	hid_t   space;
-	size_t  size;
+	hid_t    latid, lonid;
+	size_t   size;
+	uint32_t index;
 	
 	/*  Open h5 entrance  */
 	st->fid  = H5Fopen(fname, H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -349,6 +369,25 @@ static int pospopenall(const char *fname, struct wr_cpt_posp *st)
 	H5Dread(lonid, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, st->lon);
 	H5Dclose(latid);
 	H5Dclose(lonid);
+	
+	/*  Find boundery corner  */
+	st->lonmin = WR_CPT_LONLIM_MAX;
+	st->lonmax = WR_CPT_LONLIM_MIN;
+	st->latmin = WR_CPT_LATLIM_MAX;
+	st->latmax = WR_CPT_LATLIM_MIN;
+	for (index = 0; index < (uint32_t) st->nrow*st->ncol; ++index) {
+		if (WR_CPT_INVALIDLON(st->lon[index]) || WR_CPT_INVALIDLAT(st->lat[index]))
+			continue;
+		
+		if ((st->lon[index] < st->lonmin) && (st->lat[index] < st->latmin)) {
+			st->lonmin = st->lon[index];
+			st->latmin = st->lat[index];
+		}
+		if ((st->lon[index] > st->lonmax) && (st->lat[index] > st->latmax)) {
+			st->lonmax = st->lon[index];
+			st->latmax = st->lat[index];
+		}
+	}
 	
 	return 0;
 }
@@ -498,34 +537,71 @@ static int pospcleanst(struct wr_cpt_posp **st)
 	return 0;
 }
 
+static uint16_t uniqsiteid(struct cpt_pt *allpt, uint16_t ptcount, uint16_t **uid)
+{
+	float     prevlon, prevlat;
+	size_t    size;
+	uint16_t  ret;
+	uint16_t *allid;
+	
+	/*  init vars  */
+	ret = 0;
+	prevlon = (allpt+ptcount-1)->lon;
+	prevlat = (allpt+ptcount-1)->lat;
+	allid   = malloc(sizeof(int16_t[ptcount]));
+	allid[ret++] = ptcount-1;
+	
+	while (ptcount-- > 0) {
+		if (((allpt+ptcount)->lon != prevlon) && ((allpt+ptcount)->lat != prevlat)) {
+			prevlon = (allpt+ptcount)->lon;
+			prevlat = (allpt+ptcount)->lat;
+			allid[ret++] = ptcount;
+		}
+	}
+	
+	(*uid) = malloc(size = sizeof(int16_t[ret]));
+	memcpy(*uid, allid, size);
+	CPT_FREE(allid);
+	
+	return ret;
+}
+
 /*  Definition of main function  */
 int wrcpt(const char *ptname, const char *psname, const char *cptname)
 {
-	int            ret;
-	uint16_t       ptcount;
+	int ret;
+	uint16_t  ptcount, uniqptcount;
+	uint16_t *uniqptid;
 	struct cpt_pt *allpt;
 	struct cpt_ps *allps;
 	struct wr_cpt_posp *pospst;
 	
-	if (ret = querypt(ptname, &allpt, &ptcount)) {
+	pospst = malloc(sizeof(struct wr_cpt_posp));
+	pospinfoinit(psname, pospst);
+	pospopenall(psname, pospst);
+	
+	if (ret = querypt(ptname, &allpt, &ptcount, &uniqptid, &uniqptcount)) {
 		cpt_freeptall(&allpt, ptcount);
 		return ret;
 	}
 	
-	if (ptcount) {
-		allps = malloc(CPT_PSSIZE*ptcount);
-	} else {
+	if (!ptcount) {
 		cpt_freeptall(&allpt, ptcount);
+		pospcleanst(&pospst);
 		return WR_CPT_ENORCD;
 	}
 	
-	pospst = malloc(sizeof(struct wr_cpt_posp));
-	pospinfoinit(psname, pospst);
-	pospopenall(psname, pospst);
-	printf("%hd\n", pospst->secsperline);
+	allps = malloc(CPT_PSSIZE*ptcount);
+	
+	//TODO
+	for (uint16_t i = 0; i < ptcount; ++i) {
+		(allps+i)->centrepixel = NULL;
+		(allps+i)->vicinity = NULL;
+	}
 	
 	/*  Cleanup  */
 	ret = cpt_freeptall(&allpt, ptcount);
+	ret = cpt_freepsall(&allps, ptcount);
 	ret = pospcleanst(&pospst);
 	
 	return 0;
