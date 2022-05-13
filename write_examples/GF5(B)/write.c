@@ -19,6 +19,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <math.h>
 
 #include "hdf5.h"
 #include "../../read/readcpt.h"
@@ -54,8 +55,8 @@
 #define WR_CPT_XMLETTAG    "EndTime"
 #define WR_CPT_XMLLONTAG   "NadirLong"
 #define WR_CPT_XMLLATTAG   "NadirLat"
-#define WR_CPT_XMLNRTAG    "LineCount"
-#define WR_CPT_XMLNCTAG    "SampleCount"
+/*#define WR_CPT_XMLNRTAG    "LineCount"*/
+/*#define WR_CPT_XMLNCTAG    "SampleCount"*/
 
 #define WR_CPT_LONLIM_MIN  -180
 #define WR_CPT_LONLIM_MAX  180
@@ -330,8 +331,9 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount,
 /*  Init st from POSP h5  */
 static int pospopenall(const char *fname, struct wr_cpt_posp *st)
 {
-	hid_t    latid, lonid;
+	hid_t    latid, lonid, space;
 	size_t   size;
+	hsize_t  dim[2];
 	uint32_t index;
 	
 	/*  Open h5 entrance  */
@@ -350,6 +352,21 @@ static int pospopenall(const char *fname, struct wr_cpt_posp *st)
 	st->said = H5Dopen(st->ggid, WR_CPT_POSPSANAME , H5P_DEFAULT);
 	st->vaid = H5Dopen(st->ggid, WR_CPT_POSPVANAME , H5P_DEFAULT);
 	
+	/*  Buffer all lat/lon  */
+	latid = H5Dopen(st->ggid, WR_CPT_POSPLATNAME, H5P_DEFAULT);
+	lonid = H5Dopen(st->ggid, WR_CPT_POSPLONNAME, H5P_DEFAULT);
+	space = H5Dget_space(lonid);
+	H5Sget_simple_extent_dims(space, dim, NULL);
+	H5Sclose(space);
+	st->nrow = dim[0];
+	st->ncol = dim[1];
+	st->lat = malloc(size = sizeof(double[st->nrow][st->ncol]));
+	st->lon = malloc(size);
+	H5Dread(latid, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, st->lat);
+	H5Dread(lonid, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, st->lon);
+	H5Dclose(latid);
+	H5Dclose(lonid);
+	
 	/*  Space for hyper-reading  */
 	st->h2id = H5Screate_simple(2, (hsize_t[2]) {st->nrow, st->ncol}, NULL);
 	st->h3id = H5Screate_simple(3, (hsize_t[3]) {WR_CPT_POSPNBANDS, st->nrow, st->ncol}, NULL);
@@ -359,16 +376,6 @@ static int pospopenall(const char *fname, struct wr_cpt_posp *st)
 	st->l3id[0] = WR_CPT_POSPNBANDS;
 	st->l3id[1] = st->l3id[2] = 1;
 	st->l2id[0] = st->l2id[1] = 1;
-	
-	/*  Buffer all lat/lon  */
-	latid = H5Dopen(st->ggid, WR_CPT_POSPLATNAME, H5P_DEFAULT);
-	lonid = H5Dopen(st->ggid, WR_CPT_POSPLONNAME, H5P_DEFAULT);
-	st->lat = malloc(size = sizeof(double[st->nrow][st->ncol]));
-	st->lon = malloc(size);
-	H5Dread(latid, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, st->lat);
-	H5Dread(lonid, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, st->lon);
-	H5Dclose(latid);
-	H5Dclose(lonid);
 	
 	/*  Find boundery corner  */
 	st->lonmin = WR_CPT_LONLIM_MAX;
@@ -482,18 +489,18 @@ static int pospinfoinit(const char *fname, struct wr_cpt_posp *pospst)
 		}
 		
 		/*  N of row  */
-		if (pline = strstr(line, WR_CPT_XMLNRTAG)) {
-			sscanf(pline, "%*[^'>']>%hu", &pospst->nrow);
-			pospst->secsperline /= pospst->nrow;
-			if (!pospst->secsperline) pospst->secsperline = 1;
-			goto next_line;
-		}
+/*		if (pline = strstr(line, WR_CPT_XMLNRTAG)) {*/
+/*			sscanf(pline, "%*[^'>']>%hu", &pospst->nrow);*/
+/*			pospst->secsperline /= pospst->nrow;*/
+/*			if (!pospst->secsperline) pospst->secsperline = 1;*/
+/*			goto next_line;*/
+/*		}*/
 		
 		/*  N of col  */
-		if (pline = strstr(line, WR_CPT_XMLNCTAG)) {
-			sscanf(pline, "%*[^'>']>%hu", &pospst->ncol);
-			goto next_line;
-		}
+/*		if (pline = strstr(line, WR_CPT_XMLNCTAG)) {*/
+/*			sscanf(pline, "%*[^'>']>%hu", &pospst->ncol);*/
+/*			goto next_line;*/
+/*		}*/
 		
 		next_line:
 		pprev = ++pbuf;
@@ -537,71 +544,131 @@ static int pospcleanst(struct wr_cpt_posp **st)
 	return 0;
 }
 
-static uint16_t uniqsiteid(struct cpt_pt *allpt, uint16_t ptcount, uint16_t **uid)
+/*  Pairing Pt and Ps  */
+static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, uint16_t *uniqptid,
+                         uint16_t uniqptcount, struct wr_cpt_posp *pospst, struct cpt_ps **pairps)
 {
-	float     prevlon, prevlat;
-	size_t    size;
-	uint16_t  ret;
-	uint16_t *allid;
+	uint16_t ptpscount;
+	float    lonres, latres, diff, diffmin;
+	uint16_t i, j, rowlimit, collimit, ipt, iptnear;
+	uint32_t idx, idx2;
+	struct cpt_pt *ppt;
+	struct cpt_ps *pps;
 	
-	/*  init vars  */
-	ret = 0;
-	prevlon = (allpt+ptcount-1)->lon;
-	prevlat = (allpt+ptcount-1)->lat;
-	allid   = malloc(sizeof(int16_t[ptcount]));
-	allid[ret++] = ptcount-1;
+	rowlimit  = pospst->nrow-1;
+	collimit  = pospst->ncol-1;
+	ptpscount = 0;
+	*pairps   = malloc(1);
 	
-	while (ptcount-- > 0) {
-		if (((allpt+ptcount)->lon != prevlon) && ((allpt+ptcount)->lat != prevlat)) {
-			prevlon = (allpt+ptcount)->lon;
-			prevlat = (allpt+ptcount)->lat;
-			allid[ret++] = ptcount;
+	for (i = 0; i < pospst->nrow; ++i) {
+	for (j = 0; j < pospst->ncol; ++j) {
+		idx = (uint32_t) i * pospst->ncol + j;
+		
+		diffmin = UINT64_MAX;
+		for (ipt = 0; ipt < uniqptcount; ++ipt) {
+			ppt  = allpt+uniqptid[ipt];
+			diff = fabsf(ppt->lon - pospst->lon[idx]) + fabsf(ppt->lat - pospst->lat[idx]);
+			if (diff < diffmin) {
+				diffmin = diff;
+				iptnear = uniqptid[ipt];
+			}
 		}
+		
+		/*
+		 *  Although the chosen Pt is the nearest site among all Pt,
+		 *  it may also locates at the outside of image.
+		 *  lonres and latres are estimated from two nearby pixels
+		 *  as lon/lat difference minimium threshold.
+		 */
+		lonres = 0;
+		if (0 != j)
+			lonres = fabsf(pospst->lon[(uint32_t) i * pospst->ncol + j-1] - pospst->lon[idx]);
+		if (collimit != j) {
+			if (lonres) {
+				lonres += fabsf(pospst->lon[(uint32_t) i * pospst->ncol + j+1] - pospst->lon[idx]);
+				lonres /= 2;
+			} else {
+				lonres = fabsf(pospst->lon[(uint32_t) i * pospst->ncol + j+1] - pospst->lon[idx]);
+			}
+		}
+		
+		latres = 0;
+		if (0 != i)
+			latres = fabsf(pospst->lat[(uint32_t) (i-1) * pospst->ncol + j] - pospst->lat[idx]);
+		if (rowlimit != i) {
+			if (latres) {
+				latres += fabsf(pospst->lat[(uint32_t) (i+1) * pospst->ncol + j] - pospst->lat[idx]);
+				latres /= 2;
+			} else {
+				latres = fabsf(pospst->lat[(uint32_t) (i+1) * pospst->ncol + j] - pospst->lat[idx]);
+			}
+		}
+		
+		ppt = allpt+iptnear;
+		if ((fabsf(ppt->lon - pospst->lon[idx]) > lonres)
+		 || (fabsf(ppt->lat - pospst->lat[idx]) > latres))
+			continue;
+		
+		/*  Ps init  */
+		*pairps = realloc(*pairps, CPT_PSSIZE*(++ptpscount));
+		pps = *pairps + ptpscount-1;
+		
+		pps->centrepixel = NULL;//TODO malloc(CPT_PIXELSIZE);
+		
+		printf("pixel %9.4f %8.4f site %9.4f %8.4f diff %8.4f %8.4f\n",
+		       pospst->lon[idx], pospst->lat[idx], ppt->lon, ppt->lat, lonres, latres);
+		
+		pps->nvicinity = 0;//TODO
+		pps->vicinity  = NULL;//TODO
+	}
 	}
 	
-	(*uid) = malloc(size = sizeof(int16_t[ret]));
-	memcpy(*uid, allid, size);
-	CPT_FREE(allid);
+	ppt = NULL;
+	pps = NULL;
 	
-	return ret;
+	return ptpscount;
 }
 
 /*  Definition of main function  */
 int wrcpt(const char *ptname, const char *psname, const char *cptname)
 {
 	int ret;
-	uint16_t  ptcount, uniqptcount;
+	uint16_t  ptcount, uniqptcount, ptpscount;
 	uint16_t *uniqptid;
 	struct cpt_pt *allpt;
-	struct cpt_ps *allps;
+	struct cpt_ps *pairps;
 	struct wr_cpt_posp *pospst;
 	
+	/*  Ps prepare  */
 	pospst = malloc(sizeof(struct wr_cpt_posp));
 	pospinfoinit(psname, pospst);
 	pospopenall(psname, pospst);
 	
+	/*  All Pt load  */
 	if (ret = querypt(ptname, &allpt, &ptcount, &uniqptid, &uniqptcount)) {
 		cpt_freeptall(&allpt, ptcount);
 		return ret;
 	}
 	
+	/*  Pt with no record  */
 	if (!ptcount) {
 		cpt_freeptall(&allpt, ptcount);
 		pospcleanst(&pospst);
 		return WR_CPT_ENORCD;
 	}
 	
-	allps = malloc(CPT_PSSIZE*ptcount);
+	/*  Get corresponding Ps of Pt  */
+	ptpscount = posppair(allpt, ptcount, uniqptid, uniqptcount, pospst, &pairps);
 	
 	//TODO
-	for (uint16_t i = 0; i < ptcount; ++i) {
-		(allps+i)->centrepixel = NULL;
-		(allps+i)->vicinity = NULL;
+	for (uint16_t i = 0; i < ptpscount; ++i) {
+		(pairps+i)->centrepixel = NULL;
+		(pairps+i)->vicinity = NULL;
 	}
 	
 	/*  Cleanup  */
 	ret = cpt_freeptall(&allpt, ptcount);
-	ret = cpt_freepsall(&allps, ptcount);
+	ret = cpt_freepsall(&pairps, ptpscount);
 	ret = pospcleanst(&pospst);
 	
 	return 0;

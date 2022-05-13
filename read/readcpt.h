@@ -45,6 +45,7 @@ struct cpt_pixel {
 	float   lon;
 	struct  cpt_channel *channels;
 };
+#define CPT_PIXELSIZE (sizeof(struct cpt_pixel))
 
 struct cpt_ps {
 	uint8_t nvicinity;
