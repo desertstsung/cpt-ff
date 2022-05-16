@@ -26,7 +26,7 @@
 struct cpt_header {
 	uint8_t  ver;
 	uint8_t  nparam;
-	uint16_t nptps;
+	uint16_t nptx;
 	uint8_t *magic_number;
 };
 
@@ -47,31 +47,36 @@ struct cpt_pixel {
 };
 #define CPT_PIXELSIZE (sizeof(struct cpt_pixel))
 
-struct cpt_ps {
+struct cpt_px {
 	uint8_t nvicinity;
 	int8_t  minutesdiff;
 	struct  cpt_pixel *centrepixel;
 	struct  cpt_pixel *vicinity;
 };
-#define CPT_PSSIZE (sizeof(struct cpt_ps))
+#define CPT_PXSIZE (sizeof(struct cpt_px))
 
-struct cpt_pt {
-	int16_t  alt;
-	float    lat;
-	float    lon;
+struct cpt_point {
 	uint64_t seconds;
 	double  *params;
 };
+#define CPT_POINTSIZE (sizeof(struct cpt_point))
+
+struct cpt_pt {
+	int16_t alt;
+	float   lat;
+	float   lon;
+	struct cpt_point *points;
+};
 #define CPT_PTSIZE (sizeof(struct cpt_pt))
 
-struct cpt_ptps {
+struct cpt_ptx {
 	struct cpt_pt *pt;
-	struct cpt_ps *ps;
+	struct cpt_px *px;
 };
 
 struct cpt_ff {
 	struct cpt_header *hdr;
-	struct cpt_ptps   *data;
+	struct cpt_ptx    *data;
 	void  *ending;
 };
 
