@@ -7,7 +7,7 @@
  *  [2]: DPC/POSP data file
  *  [3]: output cpt
  *init date: May/10/2022
- *last modify: May/13/2022
+ *last modify: May/16/2022
  *
  */
 
@@ -47,6 +47,7 @@
 #define WR_CPT_POSPVZNAME  "View_Zen_Ang"
 #define WR_CPT_POSPSANAME  "Sol_Azim_Ang"
 #define WR_CPT_POSPVANAME  "View_Azim_Ang"
+#define WR_CPT_POSPCNTRWV  (int16_t[WR_CPT_POSPNBANDS]) {380, 410, 443, 490, 670, 865, 1380, 1610, 2250}
 
 #define WR_CPT_XMLSUFFIX   "xml"
 #define WR_CPT_XMLSUFLEN   strlen(WR_CPT_XMLSUFFIX)
@@ -111,7 +112,7 @@ WR_CPT_E
 
 
 /*  Declaration of main function  */
-int wrcpt(const char *ptname, const char *psname, const char *cptname);
+int wrcpt(const char *ptname, const char *pxname, const char *cptname);
 
 /*  Program entrance  */
 int main(int argc, char *argv[]) {
@@ -146,13 +147,27 @@ static int cpt_freethemall(uint8_t n, ...)
 }
 
 /*TODO move this fn to read/ dir
+ *  Free one or more cpt_point st pointer
+ */
+static int cpt_freepointall(struct cpt_point **p, uint16_t n)
+{
+	if (*p) {
+		while (n-- > 0)
+			CPT_FREE((*p+n)->params);
+		CPT_FREE(*p);
+	}
+	
+	return 0;
+}
+
+/*TODO move this fn to read/ dir
  *  Free one or more cpt_pt st pointer
  */
 static int cpt_freeptall(struct cpt_pt **p, uint16_t n)
 {
 	if (*p) {
 		while (n-- > 0)
-			CPT_FREE((*p+n)->params);
+			cpt_freepointall(&(*p+n)->points, (*p+n)->nt);
 		CPT_FREE(*p);
 	}
 	
@@ -188,9 +203,9 @@ static int cpt_freepixelall(struct cpt_pixel **p, uint16_t n)
 }
 
 /*TODO move this fn to read/ dir
- *  Free one or more cpt_ps st pointer
+ *  Free one or more cpt_px st pointer
  */
-static int cpt_freepsall(struct cpt_ps **p, uint16_t n)
+static int cpt_freepxall(struct cpt_px **p, uint16_t n)
 {
 	if (*p) {
 		while (n-- > 0) {
@@ -206,16 +221,18 @@ static int cpt_freepsall(struct cpt_ps **p, uint16_t n)
 /*
  *  Load site info into cpt_pt st
  */
-static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount,
-                   uint16_t **uid, uint16_t *ucount)
+static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
 {
 	int      fd;
 	char    *buffer, *pbuf, *pprev, *line;
 	char     rcddate[WR_CPT_DATELEN], rcdtime[WR_CPT_TIMELEN], rcddt[WR_CPT_DTLEN];
-	float    prevlon, prevlat;
+	float    lon, lat, alt, prevlon, prevlat;
+	double   tparams[8];
 	uint32_t flen, llen, maxlen;
+	struct cpt_point *ppoint;
 	struct cpt_pt *ppt;
-	struct tm     *stm;
+	struct tm *stm;
+	static const size_t sparams = sizeof(double[8]);
 	
 	/*  Try openning text file  */
 	if ((fd = open(fname, O_RDONLY)) < 0) {
@@ -249,12 +266,12 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount,
 	
 	stm    = malloc(sizeof(struct tm));
 	line   = malloc(1);
-	maxlen = 1;
+	maxlen = 1;  /*  max length of text line  */
+	
 	prevlon = WR_CPT_LONLIM_MAX+1;
 	prevlat = WR_CPT_LATLIM_MAX+1;
-	*uid     = malloc(1);
-	*allpt   = malloc(1);
-	*ucount  = 0;
+	
+	*allpt = malloc(1);
 	*ptcount = 0;
 	
 	/*  Handle each line  */
@@ -269,9 +286,7 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount,
 		/*  End of records  */
 		if ('<' == *line) break;
 		
-		*allpt = realloc(*allpt, CPT_PTSIZE*(++*ptcount));
-		ppt = *allpt+*ptcount-1;
-		ppt->params = malloc(sizeof(double[8]));
+		/*  Read info into stack  */
 		sscanf(line, "%*[^','],"
 		             "%[^','],%[^','],"    /*  A.read date time  */
 		             "%*[^','],%*[^','],"
@@ -295,31 +310,47 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount,
 		             
 		             "%f,%f,%hd",          /*  G.read geolocation  */
 		             
-		             rcddate, rcdtime,                           /*  A.receive  */
-		             ppt->params, ppt->params+1, ppt->params+2,  /*  B.receive  */
-		             ppt->params+3,                              /*  C.receive  */
-		             ppt->params+4,                              /*  D.receive  */
-		             ppt->params+5,                              /*  E.receive  */
-		             ppt->params+6, ppt->params+7,               /*  F.receive  */
-		             &ppt->lat, &ppt->lon, &ppt->alt);           /*  G.receive  */
+		             rcddate, rcdtime,               /*  A.receive  */
+		             tparams, tparams+1, tparams+2,  /*  B.receive  */
+		             tparams+3,                      /*  C.receive  */
+		             tparams+4,                      /*  D.receive  */
+		             tparams+5,                      /*  E.receive  */
+		             tparams+6, tparams+7,           /*  F.receive  */
+		             &lat, &lon, &alt);              /*  G.receive  */
+		
+		/*  Site of current line first appear  */
+		if ((lon != prevlon) && (lat != prevlat)) {
+			prevlon = lon;
+			prevlat = lat;
+			
+			*allpt = realloc(*allpt, CPT_PTSIZE*(++*ptcount));
+			ppt = *allpt+*ptcount-1;
+			ppt->nt  = 1;
+			ppt->lon = lon;
+			ppt->lat = lat;
+			ppt->alt = alt;
+			
+			ppt->points = malloc(CPT_POINTSIZE);
+			ppoint = ppt->points;
+		} else {  /*  site appeared before  */
+			ppt->points = realloc(ppt->points, CPT_POINTSIZE*(++ppt->nt));
+			ppoint = ppt->points+ppt->nt-1;
+		}
+		
+		ppoint->params = malloc(sparams);
+		memcpy(ppoint->params, tparams, sparams);
 		
 		snprintf(rcddt, WR_CPT_DTLEN, "%s,%s", rcddate, rcdtime);
 		strptime(rcddt, "%d:%m:%Y,%H:%M:%S", stm);
-		ppt->seconds = mktime(stm);
-		
-		if ((ppt->lon != prevlon) && (ppt->lat != prevlat)) {
-			prevlon = ppt->lon;
-			prevlat = ppt->lat;
-			*uid = realloc(*uid, sizeof(int16_t[++*ucount]));
-			(*uid)[*ucount-1] = *ptcount-1;
-		}
+		ppoint->seconds = mktime(stm);
 		
 		pprev = ++pbuf;
 	} while (*pbuf != '\0');
 	
 	/*  Set pointers to NULL  */
 	pbuf = pprev = NULL;
-	ppt  = NULL;
+	ppoint = NULL;
+	ppt = NULL;
 	
 	/*  Free allocated buffer  */
 	line = realloc(line, sizeof(char[maxlen]));
@@ -408,7 +439,43 @@ static int pospsethyper(struct wr_cpt_posp *st, uint16_t ir, uint16_t ic)
 	H5Sselect_hyperslab(st->h2id, H5S_SELECT_SET, (hsize_t[2]) {ir, ic}, NULL, st->l2id, NULL) < 0;
 }
 
-static int pospinfoinit(const char *fname, struct wr_cpt_posp *pospst)
+static int loadpxfromst(struct cpt_pixel **pixel, struct wr_cpt_posp *st, uint16_t ir, uint16_t ic)
+{
+	int ret;
+	uint8_t  ispolar;
+	uint32_t idx = (uint32_t) ir*st->ncol+ic;
+	struct cpt_channel *pchannel;
+	
+	*pixel = malloc(CPT_PIXELSIZE);
+
+	(*pixel)->lon = st->lon[idx];
+	(*pixel)->lat = st->lat[idx];
+	
+	(*pixel)->nlayer   = 1;
+	(*pixel)->nchannel = WR_CPT_POSPNBANDS;
+	
+	if (ret = pospsethyper(st, ir, ic)) return ret;
+	
+	H5Dread(st->sid, H5T_NATIVE_UINT8, st->m2id, st->h2id, H5P_DEFAULT, &(*pixel)->mask);
+	H5Dread(st->aid, H5T_NATIVE_INT16, st->m2id, st->h2id, H5P_DEFAULT, &(*pixel)->alt);
+	
+	//TODO
+	(*pixel)->channels = malloc(CPT_CHANNELSIZE * (*pixel)->nchannel);
+	for (uint16_t channel = 0; channel < (*pixel)->nchannel; ++channel) {
+		pchannel = (*pixel)->channels+channel;
+		pchannel->centrewv = -WR_CPT_POSPCNTRWV[channel];
+		ispolar = pchannel->centrewv < 0;
+		
+		/*  4 stands for sz, vz, sa and va  */
+		pchannel->ang = malloc(sizeof(float[(*pixel)->nlayer][4]));
+		pchannel->obs = malloc(sizeof(double[(*pixel)->nlayer][ispolar ? 3 : 1]));
+	}
+
+	return 0;
+}
+
+/*  Init essential info from xml  */
+static int pospinfoinit(const char *fname, struct wr_cpt_posp **pospst)
 {
 	int      fd;
 	char    *buffer, *pbuf, *pprev, *line, *pline;
@@ -440,21 +507,30 @@ static int pospinfoinit(const char *fname, struct wr_cpt_posp *pospst)
 	pprev = pbuf = buffer;
 	close(fd);
 	
-	stm    = malloc(sizeof(struct tm));
-	line   = malloc(1);
-	maxlen = 1;
+	stm  = malloc(sizeof(struct tm));
+	line = malloc(1);
+	maxlen  = 1;
+	*pospst = malloc(sizeof(struct wr_cpt_posp));
 	
 	/*  Handle each line  */
 	do {
 		while (*++pbuf != '\n') ;
 		
 		llen = pbuf-pprev;
-		if (llen > maxlen) {
-			maxlen = llen;
-			line = realloc(line, sizeof(char[llen]));
-		} else {
+		if (llen > maxlen)
+			line = realloc(line, sizeof(char[maxlen = llen]));
+		/*
+		 *  Set the rest of memory to 0 to avoid `strstr` return wrong value
+		 *  Wrong case without this fix:
+		 *    1. current line len(llen) is not greater than max line line(maxlen)
+		 *    2. buffer(line) remains the same as previous
+		 *    3. the front part of buffer(line) is replaced by newer line contents
+		 *    4. the end part of buffer(line) remains as previous
+		 *    5. needle substring happens to appear in the end part of previous one
+		 *    6. strstr return true, but needle don't really appear in this line of text
+		 */
+		else
 			memset(line+llen, 0, maxlen-llen);
-		}
 		memcpy(line, pprev, llen);
 		
 		/*  End of XML  */
@@ -464,7 +540,7 @@ static int pospinfoinit(const char *fname, struct wr_cpt_posp *pospst)
 		if (pline = strstr(line, WR_CPT_XMLSTTAG)) {
 			sscanf(pline, "%*[^'>']>%[^'<']", dtbeg);
 			strptime(dtbeg, "%Y-%m-%d %H:%M:%S", stm);
-			pospst->secswhenscan = mktime(stm);
+			(*pospst)->secswhenscan = mktime(stm);
 			goto next_line;
 		}
 		
@@ -472,7 +548,7 @@ static int pospinfoinit(const char *fname, struct wr_cpt_posp *pospst)
 		if (pline = strstr(line, WR_CPT_XMLETTAG)) {
 			sscanf(pline, "%*[^'>']>%[^'<']", dtbeg);
 			strptime(dtbeg, "%Y-%m-%d %H:%M:%S", stm);
-			pospst->secsperline = mktime(stm) - pospst->secswhenscan;
+			(*pospst)->secsperline = mktime(stm) - (*pospst)->secswhenscan;
 			goto next_line;
 		}
 		
@@ -488,20 +564,26 @@ static int pospinfoinit(const char *fname, struct wr_cpt_posp *pospst)
 			goto next_line;
 		}
 		
+		/*
+		 *  Number of col/row inside POSP XML does NOT corresponding
+		 *  the self describing dimension inside its hdf5, sometimes.
+		 *  So this part of code is deprecated.
+		 */
+		#if 0
 		/*  N of row  */
-/*		if (pline = strstr(line, WR_CPT_XMLNRTAG)) {*/
-/*			sscanf(pline, "%*[^'>']>%hu", &pospst->nrow);*/
-/*			pospst->secsperline /= pospst->nrow;*/
-/*			if (!pospst->secsperline) pospst->secsperline = 1;*/
-/*			goto next_line;*/
-/*		}*/
+		if (pline = strstr(line, WR_CPT_XMLNRTAG)) {
+			sscanf(pline, "%*[^'>']>%hu", &pospst->nrow);
+			pospst->secsperline /= pospst->nrow;
+			if (!pospst->secsperline) pospst->secsperline = 1;
+			goto next_line;
+		}
 		
 		/*  N of col  */
-/*		if (pline = strstr(line, WR_CPT_XMLNCTAG)) {*/
-/*			sscanf(pline, "%*[^'>']>%hu", &pospst->ncol);*/
-/*			goto next_line;*/
-/*		}*/
-		
+		if (pline = strstr(line, WR_CPT_XMLNCTAG)) {
+			sscanf(pline, "%*[^'>']>%hu", &pospst->ncol);
+			goto next_line;
+		}
+		#endif
 		next_line:
 		pprev = ++pbuf;
 	} while (*pbuf != '\0');
@@ -544,33 +626,42 @@ static int pospcleanst(struct wr_cpt_posp **st)
 	return 0;
 }
 
-/*  Pairing Pt and Ps  */
-static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, uint16_t *uniqptid,
-                         uint16_t uniqptcount, struct wr_cpt_posp *pospst, struct cpt_ps **pairps)
+/*  Pairing Pt and Px  */
+static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, 
+                         struct wr_cpt_posp *pospst, struct cpt_px **pairpx)
 {
-	uint16_t ptpscount;
 	float    lonres, latres, diff, diffmin;
-	uint16_t i, j, rowlimit, collimit, ipt, iptnear;
+	float    ptgeodiff[ptcount], londiff, latdiff;
+	uint8_t  appendpx;
+	uint16_t ptxcount;
+	uint16_t row, col, rowlimit, collimit, ipt, iptnear;
 	uint32_t idx, idx2;
 	struct cpt_pt *ppt;
-	struct cpt_ps *pps;
+	struct cpt_px *ppx;
+	struct cpt_point *ppoint;
 	
-	rowlimit  = pospst->nrow-1;
-	collimit  = pospst->ncol-1;
-	ptpscount = 0;
-	*pairps   = malloc(1);
+	ptxcount = 0;
+	rowlimit = pospst->nrow-1;
+	collimit = pospst->ncol-1;
+	*pairpx  = malloc(1);
 	
-	for (i = 0; i < pospst->nrow; ++i) {
-	for (j = 0; j < pospst->ncol; ++j) {
-		idx = (uint32_t) i * pospst->ncol + j;
+	/*  Init with 0/flase  */
+	for (ipt = 0; ipt < ptcount; ++ipt) {
+		ptgeodiff[ipt] = 0;
+	}
+	
+	for (row = 0; row < pospst->nrow; ++row) {
+	for (col = 0; col < pospst->ncol; ++col) {
+		idx = (uint32_t) row * pospst->ncol + col;
 		
+		/*  Nearest Pt of current pixel  */
 		diffmin = UINT64_MAX;
-		for (ipt = 0; ipt < uniqptcount; ++ipt) {
-			ppt  = allpt+uniqptid[ipt];
+		for (ipt = 0; ipt < ptcount; ++ipt) {
+			ppt  = allpt+ipt;
 			diff = fabsf(ppt->lon - pospst->lon[idx]) + fabsf(ppt->lat - pospst->lat[idx]);
 			if (diff < diffmin) {
 				diffmin = diff;
-				iptnear = uniqptid[ipt];
+				iptnear = ipt;
 			}
 		}
 		
@@ -581,71 +672,87 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, uint16_t *uniqp
 		 *  as lon/lat difference minimium threshold.
 		 */
 		lonres = 0;
-		if (0 != j)
-			lonres = fabsf(pospst->lon[(uint32_t) i * pospst->ncol + j-1] - pospst->lon[idx]);
-		if (collimit != j) {
+		if (0 != col)
+			lonres = fabsf(pospst->lon[idx-1] - pospst->lon[idx]);
+		if (collimit != col) {
 			if (lonres) {
-				lonres += fabsf(pospst->lon[(uint32_t) i * pospst->ncol + j+1] - pospst->lon[idx]);
+				lonres += fabsf(pospst->lon[idx+1] - pospst->lon[idx]);
 				lonres /= 2;
 			} else {
-				lonres = fabsf(pospst->lon[(uint32_t) i * pospst->ncol + j+1] - pospst->lon[idx]);
+				lonres = fabsf(pospst->lon[idx+1] - pospst->lon[idx]);
 			}
 		}
 		
 		latres = 0;
-		if (0 != i)
-			latres = fabsf(pospst->lat[(uint32_t) (i-1) * pospst->ncol + j] - pospst->lat[idx]);
-		if (rowlimit != i) {
+		if (0 != row)
+			latres = fabsf(pospst->lat[idx-pospst->ncol] - pospst->lat[idx]);
+		if (rowlimit != row) {
 			if (latres) {
-				latres += fabsf(pospst->lat[(uint32_t) (i+1) * pospst->ncol + j] - pospst->lat[idx]);
+				latres += fabsf(pospst->lat[idx+pospst->ncol] - pospst->lat[idx]);
 				latres /= 2;
 			} else {
-				latres = fabsf(pospst->lat[(uint32_t) (i+1) * pospst->ncol + j] - pospst->lat[idx]);
+				latres = fabsf(pospst->lat[idx+pospst->ncol] - pospst->lat[idx]);
 			}
 		}
 		
 		ppt = allpt+iptnear;
-		if ((fabsf(ppt->lon - pospst->lon[idx]) > lonres)
-		 || (fabsf(ppt->lat - pospst->lat[idx]) > latres))
+		londiff = fabsf(ppt->lon - pospst->lon[idx]);
+		latdiff = fabsf(ppt->lat - pospst->lat[idx]);
+		if ((londiff > lonres) || (latdiff > latres))
 			continue;
 		
-		/*  Ps init  */
-		*pairps = realloc(*pairps, CPT_PSSIZE*(++ptpscount));
-		pps = *pairps + ptpscount-1;
+		/*
+		 *  At most 9 pixels may match one site,
+		 *  use ptgeodiff to determine which is the closest.
+		 */
+		diff = londiff+latdiff;
+		appendpx = 1;
+		if (ptgeodiff[iptnear]) {
+			if (diff > ptgeodiff[iptnear])
+				continue;
+			else {
+				appendpx = 0;
+				ptgeodiff[iptnear] = diff;
+			}
+		} else {
+			ptgeodiff[iptnear] = diff;
+		}
 		
-		pps->centrepixel = NULL;//TODO malloc(CPT_PIXELSIZE);
+		/*  Px init  */
+		if (appendpx) {
+			*pairpx = realloc(*pairpx, CPT_PXSIZE*(++ptxcount));
+			ppx = *pairpx + ptxcount-1;
+		}
 		
-		printf("pixel %9.4f %8.4f site %9.4f %8.4f diff %8.4f %8.4f\n",
-		       pospst->lon[idx], pospst->lat[idx], ppt->lon, ppt->lat, lonres, latres);
+		loadpxfromst(&ppx->centrepixel, pospst, row, col);
 		
-		pps->nvicinity = 0;//TODO
-		pps->vicinity  = NULL;//TODO
+		//TODO
+		ppx->nvicinity = 0;
+		ppx->vicinity  = NULL;
 	}
 	}
 	
 	ppt = NULL;
-	pps = NULL;
+	ppx = NULL;
 	
-	return ptpscount;
+	return ptxcount;
 }
 
 /*  Definition of main function  */
-int wrcpt(const char *ptname, const char *psname, const char *cptname)
+int wrcpt(const char *ptname, const char *pxname, const char *cptname)
 {
 	int ret;
-	uint16_t  ptcount, uniqptcount, ptpscount;
-	uint16_t *uniqptid;
+	uint16_t  ptcount, ptxcount;
 	struct cpt_pt *allpt;
-	struct cpt_ps *pairps;
+	struct cpt_px *pairpx;
 	struct wr_cpt_posp *pospst;
 	
 	/*  Ps prepare  */
-	pospst = malloc(sizeof(struct wr_cpt_posp));
-	pospinfoinit(psname, pospst);
-	pospopenall(psname, pospst);
+	pospinfoinit(pxname, &pospst);
+	pospopenall(pxname, pospst);
 	
 	/*  All Pt load  */
-	if (ret = querypt(ptname, &allpt, &ptcount, &uniqptid, &uniqptcount)) {
+	if (ret = querypt(ptname, &allpt, &ptcount)) {
 		cpt_freeptall(&allpt, ptcount);
 		return ret;
 	}
@@ -658,17 +765,16 @@ int wrcpt(const char *ptname, const char *psname, const char *cptname)
 	}
 	
 	/*  Get corresponding Ps of Pt  */
-	ptpscount = posppair(allpt, ptcount, uniqptid, uniqptcount, pospst, &pairps);
-	
-	//TODO
-	for (uint16_t i = 0; i < ptpscount; ++i) {
-		(pairps+i)->centrepixel = NULL;
-		(pairps+i)->vicinity = NULL;
+	ptxcount = posppair(allpt, ptcount, pospst, &pairpx);
+	for (uint16_t i = 0; i < ptxcount; ++i) {
+		printf("%2d: lon %f lat %f alt %d\n",
+		       i, (pairpx+i)->centrepixel->lon,
+		       (pairpx+i)->centrepixel->lat, (pairpx+i)->centrepixel->alt);
 	}
 	
 	/*  Cleanup  */
 	ret = cpt_freeptall(&allpt, ptcount);
-	ret = cpt_freepsall(&pairps, ptpscount);
+	ret = cpt_freepxall(&pairpx, ptxcount);
 	ret = pospcleanst(&pospst);
 	
 	return 0;

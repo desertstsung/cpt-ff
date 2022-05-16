@@ -1,7 +1,7 @@
 /*
  *file: read/readcpt.h
  *init date: May/10/2022
- *last modify: May/11/2022
+ *last modify: May/16/2022
  *
  */
 
@@ -35,6 +35,7 @@ struct cpt_channel {
 	double  *obs;
 	double  *ang;
 };
+#define CPT_CHANNELSIZE (sizeof(struct cpt_channel))
 
 struct cpt_pixel {
 	uint8_t mask;
