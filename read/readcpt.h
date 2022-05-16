@@ -62,6 +62,7 @@ struct cpt_point {
 #define CPT_POINTSIZE (sizeof(struct cpt_point))
 
 struct cpt_pt {
+	uint8_t nt;
 	int16_t alt;
 	float   lat;
 	float   lon;
