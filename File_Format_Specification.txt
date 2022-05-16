@@ -1,4 +1,4 @@
-Technical details on Compact Point-to-pixels file format
+Technical details on Compact Points-to-pixels file format
 for satellite-based atmospherical inversion algorithms
 Testing and validation.
 
@@ -13,31 +13,33 @@ File format hierarchy:
     -Version:
        1 byte consists of 4 bits major version and 4 bits
        minor version. e.g. 10000110 corresponds version 8.6
-    -Count of PtPs(ns):
-       2 bytes unsigned integer indicating number of PtPs,
+    -Count of Ptx(ns):
+       2 bytes unsigned integer indicating number of Ptx,
        which is the fundamental component of Data,
-       described in L25.
-    -Count of parameters per Pt(np):
+       described in L24.
+    -Count of parameters per Point(np):
        1 byte unsigned integer indicating number of params
-       inside Pt, which is one element of PtPs, described
-       in L26.
-  -Data: *Consists of [ns] PtPs.
-    -PtPs:
-      -Pt: *Param may be multiple according to np.
+       inside Point, described in L33.
+  -Data: *Consists of [ns] Ptx.
+    -Ptx:
+      -Pt: *Point may be multiple according to nt.
         -Geolocation:
            4 bytes single floating point number of latitude
            and 4 bytes single floating point number of
            longitude and 2 bytes signed integer of altitude
+        -Count of Point(nt):
+           1 byte unsigned integer indicating number of
+           Point, described below.
+        -Point: *Param may be multiple according to np.
+          -Datetime:
+             8 bytes unsigned integer indicating the seconds
+             elapsed since the Epoch(1/Jan/1970T00:00)
+          -Param:
+             8 bytes double floating point number.
+      -Px: *Vicinity may be multiple according to nv(L70).
         -Datetime:
-           8 bytes unsigned integer indicating the seconds
-           elapsed since the Epoch(1/Jan/1970T00:00)
-        -Param:
-           8 bytes double floating point number.
-      -Ps: *Vicinity may be multiple according to nv(L68).
-        -Time difference:
-           1 byte signed integer indicating minutes pass or
-           before Datetime of Pt.
-        -Pixel: *Channel may be multiple due to nc(L46).
+           Same as that in Point(L34).
+        -Pixel: *Channel may be multiple due to nc(L49).
           -Geolocation:
              format like Geolocation in Pt, as well as an
              extra 1 byte unsigned integer indicating
