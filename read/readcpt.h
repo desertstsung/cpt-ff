@@ -35,7 +35,6 @@ struct cpt_channel {
 	double  *obs;
 	double  *ang;
 };
-#define CPT_CHANNELSIZE (sizeof(struct cpt_channel))
 
 struct cpt_pixel {
 	uint8_t mask;
@@ -54,7 +53,6 @@ struct cpt_px {
 	struct  cpt_pixel *centrepixel;
 	struct  cpt_pixel *vicinity;
 };
-#define CPT_PXSIZE (sizeof(struct cpt_px))
 
 struct cpt_point {
 	uint64_t seconds;
@@ -69,7 +67,6 @@ struct cpt_pt {
 	float   lon;
 	struct cpt_point *points;
 };
-#define CPT_PTSIZE (sizeof(struct cpt_pt))
 
 struct cpt_ptx {
 	struct cpt_pt *pt;
