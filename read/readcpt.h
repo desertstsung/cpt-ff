@@ -1,7 +1,7 @@
 /*
  *file: read/readcpt.h
  *init date: May/10/2022
- *last modify: May/16/2022
+ *last modify: May/17/2022
  *
  */
 
@@ -49,8 +49,8 @@ struct cpt_pixel {
 #define CPT_PIXELSIZE (sizeof(struct cpt_pixel))
 
 struct cpt_px {
-	uint8_t nvicinity;
-	int8_t  minutesdiff;
+	uint8_t  nvicinity;
+	uint64_t seconds;
 	struct  cpt_pixel *centrepixel;
 	struct  cpt_pixel *vicinity;
 };
