@@ -141,7 +141,7 @@ int main(int argc, char *argv[]) {
              *ptr2 = malloc(size2);
  *      cpt_freethemall(2, &ptr1, &ptr2);
  */
-static int cpt_freethemall(uint8_t n, ...)
+int cpt_freethemall(uint8_t n, ...)
 {
 	va_list ap;
 	void **p;
@@ -159,7 +159,7 @@ static int cpt_freethemall(uint8_t n, ...)
 /*TODO move this fn to read/ dir
  *  Free one or more cpt_point st pointer
  */
-static int cpt_freepointall(struct cpt_point **p, uint16_t n)
+int cpt_freepointall(struct cpt_point **p, uint16_t n)
 {
 	if (*p) {
 		while (n-- > 0)
@@ -173,7 +173,7 @@ static int cpt_freepointall(struct cpt_point **p, uint16_t n)
 /*TODO move this fn to read/ dir
  *  Free one or more cpt_pt st pointer
  */
-static int cpt_freeptall(struct cpt_pt **p, uint16_t n)
+int cpt_freeptall(struct cpt_pt **p, uint16_t n)
 {
 	if (*p) {
 		while (n-- > 0)
@@ -187,7 +187,7 @@ static int cpt_freeptall(struct cpt_pt **p, uint16_t n)
 /*TODO move this fn to read/ dir
  *  Free one or more cpt_channel st pointer
  */
-static int cpt_freechannelall(struct cpt_channel **p, uint16_t n)
+int cpt_freechannelall(struct cpt_channel **p, uint16_t n)
 {
 	if (*p) {
 		while (n-- > 0)
@@ -201,7 +201,7 @@ static int cpt_freechannelall(struct cpt_channel **p, uint16_t n)
 /*TODO move this fn to read/ dir
  *  Free one or more cpt_pixel st pointer
  */
-static int cpt_freepixelall(struct cpt_pixel **p, uint16_t n)
+int cpt_freepixelall(struct cpt_pixel **p, uint16_t n)
 {
 	if (*p) {
 		while (n-- > 0)
@@ -215,7 +215,7 @@ static int cpt_freepixelall(struct cpt_pixel **p, uint16_t n)
 /*TODO move this fn to read/ dir
  *  Free one or more cpt_px st pointer
  */
-static int cpt_freepxall(struct cpt_px **p, uint16_t n)
+int cpt_freepxall(struct cpt_px **p, uint16_t n)
 {
 	if (*p) {
 		while (n-- > 0) {
@@ -916,18 +916,21 @@ static int writepixel(int filedes, struct cpt_pixel *pixel)
 /*  Export struct to file  */
 static int writecpttofile(const char *fname, struct cpt_ff *st)
 {
+	int fd;
 	uint8_t  ipoint, ivicinity;
 	uint16_t iptx;
-	int fd;
+	struct cpt_pt *ppt;
+	struct cpt_px *ppx;
+	struct cpt_point *ppoint;
 	
 	/*  File already exist ?  */
 	fd = open(fname, O_PATH);
 	if (fd > 0) {
 		close(fd);
 #ifdef CPT_DEBUG
-		return EEXIST;
-#else
 		fd = open(fname, O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR);
+#else
+		return EEXIST;
 #endif
 	} else {
 		fd = open(fname, O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR);
@@ -943,21 +946,24 @@ static int writecpttofile(const char *fname, struct cpt_ff *st)
 	for (iptx = 0; iptx < st->hdr->nptx; ++iptx) {
 		
 		/*  Pt  */
-		safewrite(fd, &(st->data->pt+iptx)->lon, _cpt_4byte);
-		safewrite(fd, &(st->data->pt+iptx)->lat, _cpt_4byte);
-		safewrite(fd, &(st->data->pt+iptx)->alt, _cpt_2byte);
-		safewrite(fd, &(st->data->pt+iptx)->nt , _cpt_1byte);
-		for (ipoint = 0; ipoint < (st->data->pt+iptx)->nt; ++ ipoint) {
-			safewrite(fd, &((st->data->pt+iptx)->points+ipoint)->seconds, _cpt_8byte);
-			safewrite(fd, ((st->data->pt+iptx)->points+ipoint)->params, _cpt_parsz);
+		ppt = st->data->pt+iptx;
+		safewrite(fd, &ppt->lon, _cpt_4byte);
+		safewrite(fd, &ppt->lat, _cpt_4byte);
+		safewrite(fd, &ppt->alt, _cpt_2byte);
+		safewrite(fd, &ppt->nt , _cpt_1byte);
+		for (ipoint = 0; ipoint < ppt->nt; ++ ipoint) {
+			ppoint = ppt->points+ipoint;
+			safewrite(fd, &ppoint->seconds, _cpt_8byte);
+			safewrite(fd, ppoint->params, _cpt_parsz);
 		}
 		
 		/*  Px  */
-		safewrite(fd, &(st->data->px+iptx)->seconds, _cpt_8byte);
-		writepixel(fd, (st->data->px+iptx)->centrepixel);
-		safewrite(fd, &(st->data->px+iptx)->nvicinity, _cpt_1byte);
-		for (ivicinity = 0; ivicinity < (st->data->px+iptx)->nvicinity; ++ivicinity) {
-			writepixel(fd, (st->data->px+iptx)->vicinity+ivicinity);
+		ppx = st->data->px+iptx;
+		safewrite(fd, &ppx->seconds, _cpt_8byte);
+		writepixel(fd, ppx->centrepixel);
+		safewrite(fd, &ppx->nvicinity, _cpt_1byte);
+		for (ivicinity = 0; ivicinity < ppx->nvicinity; ++ivicinity) {
+			writepixel(fd, ppx->vicinity+ivicinity);
 		}
 		
 	}
@@ -965,6 +971,10 @@ static int writecpttofile(const char *fname, struct cpt_ff *st)
 	/*  Ending  */
 	safewrite(fd, st->ending, CPT_ENDINGLEN);
 	close(fd);
+	
+	ppt = NULL;
+	ppx = NULL;
+	ppoint = NULL;
 
 	return 0;
 }
