@@ -19,14 +19,15 @@ File format hierarchy:
        described in L24.
     -Count of parameters per Point(np):
        1 byte unsigned integer indicating number of params
-       inside Point, described in L33.
+       inside Point, described in L34.
   -Data: *Consists of [ns] Ptx.
     -Ptx:
       -Pt: *Point may be multiple according to nt.
         -Geolocation:
-           4 bytes single floating point number of latitude
-           and 4 bytes single floating point number of
-           longitude and 2 bytes signed integer of altitude
+           4 bytes single floating point number of
+           longitude and 4 bytes single floating point
+           number of latitude and 2 bytes signed integer
+           of altitude.
         -Count of Point(nt):
            1 byte unsigned integer indicating number of
            Point, described below.
@@ -36,10 +37,10 @@ File format hierarchy:
              elapsed since the Epoch(1/Jan/1970T00:00)
           -Param:
              8 bytes double floating point number.
-      -Px: *Vicinity may be multiple according to nv(L70).
+      -Px: *Vicinity may be multiple according to nv(L71).
         -Datetime:
-           Same as that in Point(L34).
-        -Pixel: *Channel may be multiple due to nc(L49).
+           Same as that in Point(L35).
+        -Pixel: *Channel may be multiple due to nc(L50).
           -Geolocation:
              format like Geolocation in Pt, as well as an
              extra 1 byte unsigned integer indicating
