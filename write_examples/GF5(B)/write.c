@@ -7,7 +7,7 @@
  *  [2]: DPC/POSP data file
  *  [3]: output cpt
  *init date: May/10/2022
- *last modify: May/17/2022
+ *last modify: May/18/2022
  *
  */
 
@@ -67,6 +67,8 @@
 
 #define WR_CPT_INVALIDLON(lon) ((lon < WR_CPT_LONLIM_MIN) || (lon > WR_CPT_LONLIM_MAX))
 #define WR_CPT_INVALIDLAT(lat) ((lat < WR_CPT_LATLIM_MIN) || (lat > WR_CPT_LATLIM_MAX))
+
+#define WR_CPT_SECDIFFMAX ((uint64_t) 60*30)  /*  30 min  */
 
 struct wr_cpt_posp {
 	hid_t iid;   /*  entrance of intensity    */
@@ -661,25 +663,34 @@ static int pospcleanst(struct wr_cpt_posp **st)
 
 /*  Pairing Pt and Px  */
 static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_posp *pospst,
-                         struct cpt_px **pairpx, struct cpt_pt **paript)
+                         struct cpt_px **pairpx, struct cpt_pt **pairpt)
 {
 	float    lonres, latres, diff, diffmin;
 	float    ptgeodiff[ptcount], londiff, latdiff;
-	uint8_t  appendpx, ipoint, rownottop, rownotbottom;
+	size_t   sparams = sizeof(double[8]);
+	uint8_t  appendpx, ipoint, npoint, npointmax, rownottop, rownotbottom;
+	uint8_t *pointloc;
 	uint16_t ptxcount;
 	uint16_t row, col, rowlimit, collimit, ipt, iptnear;
 	uint32_t idx;
 	uint64_t linesec;
-	struct cpt_pt *ppt;
-	struct cpt_pt *ppairpt;
+	struct cpt_pt *ppt, *ppairpt;
 	struct cpt_px *ppx;
-	struct cpt_point *ppoint;
+	struct cpt_point *ppoint, *ppairpoint;
 	
 	ptxcount = 0;
 	rowlimit = pospst->nrow-1;
 	collimit = pospst->ncol-1;
 	*pairpx  = NULL;
-	*paript  = NULL;
+	*pairpt  = NULL;
+	
+	npointmax = 0;
+	for (ipt = 0; ipt < ptcount; ++ipt) {
+		npoint = (allpt+ipt)->nt;
+		if (npoint > npointmax)
+			npointmax = npoint;
+	}
+	pointloc = malloc(sizeof(int8_t[npointmax]));
 	
 	/*  Init with 0/flase  */
 	for (ipt = 0; ipt < ptcount; ++ipt) {
@@ -688,16 +699,14 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_p
 	
 	for (row = 0; row < pospst->nrow; ++row) {
 		/*  Vars can be put outside of column loop  */
-		linesec = st->secswhenscan + (rowlimit-row)*st->secsperline;
-		if (linesec > st->secswhenend)
-			linesec = st->secswhenend;
+		linesec = pospst->secswhenscan + (rowlimit-row)*pospst->secsperline;
+		if (linesec > pospst->secswhenend)
+			linesec = pospst->secswhenend;
 		
 		idx = (uint32_t) row * pospst->ncol;
 		rownottop = (row != 0);
 		rownotbottom = (row != rowlimit);
-	for (col = 0; col < pospst->ncol; ++col) {
-		idx += col;
-		
+	for (col = 0; col < pospst->ncol; ++col, ++idx) {
 		/*  Nearest Pt of current pixel  */
 		diffmin = UINT64_MAX;
 		for (ipt = 0; ipt < ptcount; ++ipt) {
@@ -752,9 +761,9 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_p
 		diff = londiff+latdiff;
 		appendpx = 1;
 		if (ptgeodiff[iptnear]) {
-			if (diff > ptgeodiff[iptnear])
+			if (diff > ptgeodiff[iptnear]) {
 				goto next_pixel;
-			else {
+			} else {
 				appendpx = 0;
 				ptgeodiff[iptnear] = diff;
 			}
@@ -766,18 +775,45 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_p
 		 *  The pixel matches this closest site, spatially.
 		 *  We would also check them temporally, based on the datetime of satellite pixel.
 		 */
-		ppairpt = *pairpt + ptxcount-1;
+		npoint  = 0;
 		for (ipoint = 0; ipoint < ppt->nt; ++ipoint) {
 			ppoint = ppt->points + ipoint;
-			//TODO
+			if (((ppoint->seconds > linesec) ?
+			(ppoint->seconds-linesec) : (linesec-ppoint->seconds)) < WR_CPT_SECDIFFMAX) {
+				pointloc[npoint++] = ipoint;
+			}
 		}
 		
-		/*  Px init  */
+		if (!npoint)
+			goto next_pixel;
+		
 		if (appendpx) {
-			*pairpx = realloc(*pairpx, sizeof(struct cpt_px[++ptxcount]));
+			/*
+			 *  Finally, the Points and the Pixels get paired.
+			 *  Points is multiple as its several obs from certian location.
+			 *  Pixels is multiple as its several location from one time.
+			 */
+			*pairpt = realloc(*pairpt, sizeof(struct cpt_pt[++ptxcount]));
+			ppairpt = *pairpt + ptxcount-1;
+			ppairpt->nt  = npoint;
+			ppairpt->alt = ppt->alt;
+			ppairpt->lon = ppt->lon;
+			ppairpt->lat = ppt->lat;
+			ppairpt->points = malloc(sizeof(struct cpt_point[ppairpt->nt]));
+			for (ipoint = 0; ipoint < npoint; ++ipoint) {
+				ppoint = ppt->points + pointloc[ipoint];
+				ppairpoint = ppairpt->points + ipoint;
+				ppairpoint->seconds = ppoint->seconds;
+				ppairpoint->params = malloc(sparams);
+				memcpy(ppairpoint->params, ppoint->params, sparams);
+			}
+			
+			/*  Px init or reload  */
+			*pairpx = realloc(*pairpx, sizeof(struct cpt_px[ptxcount]));
 			ppx = *pairpx + ptxcount-1;
 		}
 		
+		/*  Centre pixel  */
 		loadpxfromst(&ppx->centrepixel, pospst, row, col, appendpx);
 		
 		//TODO
@@ -789,9 +825,10 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_p
 	}
 	}
 	
-	ppt = NULL;
 	ppx = NULL;
-	ppoint = NULL;
+	ppt = ppairpt = NULL;
+	ppoint = ppairpoint = NULL;
+	CPT_FREE(pointloc);
 	
 	return ptxcount;
 }
@@ -826,14 +863,16 @@ int wrcpt(const char *ptname, const char *pxname, const char *cptname)
 	/*  Get corresponding Px of Pt  */
 	ptxcount = posppair(allpt, ptcount, pospst, &pairpx, &pairpt);
 	for (uint16_t i = 0; i < ptxcount; ++i) {
-		printf("%2d: lon %f lat %f alt %d\n",
-		       i, (pairpx+i)->centrepixel->lon,
-		       (pairpx+i)->centrepixel->lat, (pairpx+i)->centrepixel->alt);
+		printf("%2d: lon %f lat %f alt %d points %d\n",
+		       i+1, (pairpx+i)->centrepixel->lon,
+		       (pairpx+i)->centrepixel->lat, (pairpx+i)->centrepixel->alt,
+		       (pairpt+i)->nt);
 	}
 	
 	/*  Cleanup  */
 	ret = cpt_freeptall(&allpt, ptcount);
 	ret = cpt_freepxall(&pairpx, ptxcount);
+	ret = cpt_freeptall(&pairpt, ptxcount);
 	ret = pospcleanst(&pospst);
 	
 	return 0;
