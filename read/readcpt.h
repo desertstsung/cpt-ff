@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <string.h>
 
 
 /*  Const numbers  */
@@ -128,13 +129,6 @@ time_t curtime;
 		CPT_ERRLOC; \
 	} while (0)
 
-#define CPT_ERRFIO(fd) \
-	do { \
-		close(fd); \
-		CPT_ERRECHOWITHTIME("ERROR %d %s\n", errno, strerror(errno)); \
-		CPT_ERRLOC; \
-	} while (0)
-
 #define CPT_ERRMEM(ptr) \
 	do { \
 		CPT_FREE(ptr); \
@@ -143,6 +137,13 @@ time_t curtime;
 	} while (0)
 
 
-
-
+/*  fn  */
+int cpt_readall(const char *fname, struct cpt_ptx *ptx, uint16_t *nptx, uint8_t *nparam);
+int readpixel(int filedes, struct cpt_pixel *pixel);
+int cpt_freethemall(uint8_t n, ...);
+int cpt_freepointall(struct cpt_point **p, uint16_t n);
+int cpt_freeptall(struct cpt_pt **p, uint16_t n);
+int cpt_freechannelall(struct cpt_channel **p, uint16_t n);
+int cpt_freepixelall(struct cpt_pixel **p, uint16_t n);
+int cpt_freepxall(struct cpt_px **p, uint16_t n);
 

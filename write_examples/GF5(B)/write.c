@@ -951,7 +951,7 @@ static int writecpttofile(const char *fname, struct cpt_ff *st)
 		safewrite(fd, &ppt->lat, _cpt_4byte);
 		safewrite(fd, &ppt->alt, _cpt_2byte);
 		safewrite(fd, &ppt->nt , _cpt_1byte);
-		for (ipoint = 0; ipoint < ppt->nt; ++ ipoint) {
+		for (ipoint = 0; ipoint < ppt->nt; ++ipoint) {
 			ppoint = ppt->points+ipoint;
 			safewrite(fd, &ppoint->seconds, _cpt_8byte);
 			safewrite(fd, ppoint->params, _cpt_parsz);
