@@ -443,7 +443,7 @@ static int pospsethyper(struct wr_cpt_posp *st, uint16_t ib, uint16_t ir, uint16
 }
 
 /*  Load certain location POSP pixel  */
-static int loadpxfromst(struct cpt_pixel **pixel, struct wr_cpt_posp *st,
+static int loadpxfromst(struct cpt_pixel *pixel, struct wr_cpt_posp *st,
                         uint16_t ir, uint16_t ic, uint8_t allocate)
 {
 	double   tmp;
@@ -451,27 +451,24 @@ static int loadpxfromst(struct cpt_pixel **pixel, struct wr_cpt_posp *st,
 	uint32_t idx = (uint32_t) ir*st->ncol+ic;
 	struct cpt_channel *pchannel;
 	
-	if (allocate)
-		*pixel = malloc(CPT_PIXELSIZE);
-
-	(*pixel)->lon = st->lon[idx];
-	(*pixel)->lat = st->lat[idx];
+	pixel->lon = st->lon[idx];
+	pixel->lat = st->lat[idx];
 	
-	(*pixel)->nlayer   = 1;
-	(*pixel)->nchannel = WR_CPT_POSPNBANDS;
+	pixel->nlayer   = 1;
+	pixel->nchannel = WR_CPT_POSPNBANDS;
 	
 	/*  Load channel-unrelated data  */
 	pospsethyper(st, 0, ir, ic);
 	H5Dread(st->sid, H5T_NATIVE_DOUBLE, st->msid, st->h2id, H5P_DEFAULT, &tmp);
-	(*pixel)->mask = tmp;
+	pixel->mask = tmp;
 	H5Dread(st->aid, H5T_NATIVE_DOUBLE, st->msid, st->h2id, H5P_DEFAULT, &tmp);
-	(*pixel)->alt  = tmp;
+	pixel->alt  = tmp;
 	
 	/*  Load channels  */
 	if (allocate)
-		(*pixel)->channels = malloc(sizeof(struct cpt_channel[(*pixel)->nchannel]));
-	for (uint16_t channel = 0; channel < (*pixel)->nchannel; ++channel) {
-		pchannel = (*pixel)->channels+channel;
+		pixel->channels = malloc(sizeof(struct cpt_channel[pixel->nchannel]));
+	for (uint16_t channel = 0; channel < pixel->nchannel; ++channel) {
+		pchannel = pixel->channels+channel;
 		pchannel->centrewv = WR_CPT_POSPCNTRWV[channel];
 		ispolar = pchannel->centrewv < 0;
 		
@@ -481,8 +478,8 @@ static int loadpxfromst(struct cpt_pixel **pixel, struct wr_cpt_posp *st,
 		 *  3 stands for I/Q/U
 		 */
 		if (allocate) {
-			pchannel->ang = malloc(sizeof(double[(*pixel)->nlayer][4]));
-			pchannel->obs = malloc(sizeof(double[(*pixel)->nlayer][ispolar ? 3 : 1]));
+			pchannel->ang = malloc(sizeof(double[pixel->nlayer][4]));
+			pchannel->obs = malloc(sizeof(double[pixel->nlayer][ispolar ? 3 : 1]));
 		}
 		
 		/*  set hyperslab  */
@@ -665,18 +662,21 @@ static int pospcleanst(struct wr_cpt_posp **st)
 static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_posp *pospst,
                          struct cpt_px **pairpx, struct cpt_pt **pairpt)
 {
-	float    lonres, latres, diff, diffmin;
-	float    ptgeodiff[ptcount], londiff, latdiff;
+	float    lonres, latres, diff, diffmin,
+	         ptgeodiff[ptcount], londiff, latdiff;
 	size_t   sparams = sizeof(double[8]);
-	uint8_t  appendpx, ipoint, npoint, npointmax, rownottop, rownotbottom;
+	uint8_t  appendpx, ipoint, npoint, npointmax, ivicinity,
+	         rownottop, rownotbottom, colnotleft, colnotright;
 	uint8_t *pointloc;
-	uint16_t ptxcount;
-	uint16_t row, col, rowlimit, collimit, ipt, iptnear;
-	uint32_t idx;
+	int16_t  rowv, colv;
+	uint16_t row, col, rowlimit, collimit, ipt, iptnear, ptxcount;
+	uint32_t idx, idxv;
 	uint64_t linesec;
-	struct cpt_pt *ppt, *ppairpt;
+	struct cpt_pt *ppt,
+	              *ppairpt;
 	struct cpt_px *ppx;
-	struct cpt_point *ppoint, *ppairpoint;
+	struct cpt_point *ppoint,
+	                 *ppairpoint;
 	
 	ptxcount = 0;
 	rowlimit = pospst->nrow-1;
@@ -725,9 +725,9 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_p
 		 *  as lon/lat difference minimium threshold.
 		 */
 		lonres = 0;
-		if (0 != col)
+		if (colnotleft  = (col != 0))
 			lonres = fabsf(pospst->lon[idx-1] - pospst->lon[idx]);
-		if (collimit != col) {
+		if (colnotright = (col != collimit)) {
 			if (lonres) {
 				lonres += fabsf(pospst->lon[idx+1] - pospst->lon[idx]);
 				lonres /= 2;
@@ -811,14 +811,41 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_p
 			/*  Px init or reload  */
 			*pairpx = realloc(*pairpx, sizeof(struct cpt_px[ptxcount]));
 			ppx = *pairpx + ptxcount-1;
+			ppx->centrepixel = malloc(CPT_PIXELSIZE);
+			ppx->nvicinity   = 0;
+			ppx->vicinity    = NULL;
 		}
 		
 		/*  Centre pixel  */
-		loadpxfromst(&ppx->centrepixel, pospst, row, col, appendpx);
+		loadpxfromst(ppx->centrepixel, pospst, row, col, appendpx);
 		
-		//TODO
-		ppx->nvicinity = 0;
-		ppx->vicinity  = NULL;
+		/*  Vicinity count  */
+		switch (rownottop+rownotbottom+colnotleft+colnotright) {
+		case 4: ivicinity = 8; break;
+		case 3: ivicinity = 5; break;
+		case 2: ivicinity = 3; break;
+		default: ivicinity = 0;
+		}
+		
+		/*  Vicinity memory manage  */
+		if (ivicinity)
+			ppx->vicinity = realloc(ppx->vicinity, sizeof(struct cpt_pixel[ppx->nvicinity = ivicinity]));
+		
+		/*  Vicinity assignment  */
+		ivicinity = 0;
+		for (rowv = -1; rowv < 2; ++rowv) {
+			if (((-1 == rowv) && !rownottop) || ((1 == rowv) && !rownotbottom))
+				continue;
+			for (colv = -1; colv < 2; ++colv) {
+				if (((-1 == colv) && !colnotleft) || ((1 == colv) && !colnotright))
+					continue;
+				/*  Centre pixel already load before  */
+				if ((0 == rowv) && (0 == colv))
+					continue;
+				loadpxfromst(ppx->vicinity+ivicinity++, pospst,
+				             row+rowv, col+colv, appendpx);
+			}
+		}
 		
 		next_pixel:
 		continue;
@@ -843,7 +870,7 @@ int wrcpt(const char *ptname, const char *pxname, const char *cptname)
 	struct cpt_px *pairpx;
 	struct wr_cpt_posp *pospst;
 	
-	/*  Ps prepare  */
+	/*  Px prepare  */
 	pospinfoinit(pxname, &pospst);
 	pospopenall(pxname, pospst);
 	
@@ -853,20 +880,19 @@ int wrcpt(const char *ptname, const char *pxname, const char *cptname)
 		return ret;
 	}
 	
-	/*  Pt with no record  */
+	/*  Exit when there's no record in Pt  */
 	if (!ptcount) {
 		cpt_freeptall(&allpt, ptcount);
 		pospcleanst(&pospst);
 		return WR_CPT_ENORCD;
 	}
 	
-	/*  Get corresponding Px of Pt  */
+	/*  Get paired Px and Pt  */
 	ptxcount = posppair(allpt, ptcount, pospst, &pairpx, &pairpt);
 	for (uint16_t i = 0; i < ptxcount; ++i) {
-		printf("%2d: lon %f lat %f alt %d points %d\n",
+		printf("No.%03d: lon %9.4f lat %8.4f with %2d points\n",
 		       i+1, (pairpx+i)->centrepixel->lon,
-		       (pairpx+i)->centrepixel->lat, (pairpx+i)->centrepixel->alt,
-		       (pairpt+i)->nt);
+		       (pairpx+i)->centrepixel->lat, (pairpt+i)->nt);
 	}
 	
 	/*  Cleanup  */
