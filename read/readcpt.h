@@ -18,8 +18,18 @@
 
 
 /*  Const numbers  */
-#define CPT_MAGIC  (uint8_t[13]) {0x02, 'L', 'e', 'r', 'S', 'A', 'T', '@', 'c', 'p', 't', '\n', 0x03}
-#define CPT_ENDING (uint8_t[16]) {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+#define CPT_MAGICLEN  13
+#define CPT_ENDINGLEN 16
+#define CPT_MAGIC     (uint8_t[CPT_MAGICLEN]) \
+                      {0x02, 'L', 'e', 'r', 'S', 'A', 'T', '@', 'c', 'p', 't', '\n', 0x03}
+#define CPT_ENDING    (uint8_t[CPT_ENDINGLEN]) \
+                      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+
+
+/*  Version  */
+#define CPT_VER_MAJOR (uint8_t) 0
+#define CPT_VER_MINOR (uint8_t) 1
+#define CPT_VERSION   ((CPT_VER_MAJOR<<4) | CPT_VER_MINOR)
 
 
 /*  Structures in cpt hierarchy  */

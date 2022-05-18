@@ -30,6 +30,7 @@
 #define WR_CPT_DATELEN      11
 #define WR_CPT_TIMELEN      9
 #define WR_CPT_DTLEN        (WR_CPT_DATELEN+WR_CPT_TIMELEN)
+#define WR_CPT_NPARAM       8
 
 
 /*  Satellite info settings  */
@@ -57,8 +58,6 @@
 #define WR_CPT_XMLETTAG    "EndTime"
 #define WR_CPT_XMLLONTAG   "NadirLong"
 #define WR_CPT_XMLLATTAG   "NadirLat"
-/*#define WR_CPT_XMLNRTAG    "LineCount"*/
-/*#define WR_CPT_XMLNCTAG    "SampleCount"*/
 
 #define WR_CPT_LONLIM_MIN  -180
 #define WR_CPT_LONLIM_MAX  180
@@ -112,6 +111,14 @@ WR_CPT_EMEM,
 WR_CPT_ENORCD,
 WR_CPT_E
 };
+
+
+/*  XXX  */
+const static size_t _cpt_1byte = sizeof(int8_t );
+const static size_t _cpt_2byte = sizeof(int16_t);
+const static size_t _cpt_4byte = sizeof(int32_t);
+const static size_t _cpt_8byte = sizeof(int64_t);
+const static size_t _cpt_parsz = sizeof(double[WR_CPT_NPARAM]);
 
 
 /*  Declaration of main function  */
@@ -230,12 +237,11 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
 	char    *buffer, *pbuf, *pprev, *line;
 	char     rcddate[WR_CPT_DATELEN], rcdtime[WR_CPT_TIMELEN], rcddt[WR_CPT_DTLEN];
 	float    lon, lat, alt, prevlon, prevlat;
-	double   tparams[8];
+	double   tparams[WR_CPT_NPARAM];
 	uint32_t flen, llen, maxlen;
 	struct cpt_point *ppoint;
 	struct cpt_pt *ppt;
 	struct tm stm;
-	size_t sparams = sizeof(double[8]);
 	
 	/*  Try openning text file  */
 	if ((fd = open(fname, O_RDONLY)) < 0) {
@@ -339,8 +345,8 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
 			ppoint = ppt->points+ppt->nt-1;
 		}
 		
-		ppoint->params = malloc(sparams);
-		memcpy(ppoint->params, tparams, sparams);
+		ppoint->params = malloc(_cpt_parsz);
+		memcpy(ppoint->params, tparams, _cpt_parsz);
 		
 		snprintf(rcddt, WR_CPT_DTLEN, "%s,%s", rcddate, rcdtime);
 		strptime(rcddt, "%d:%m:%Y,%H:%M:%S", &stm);
@@ -437,9 +443,9 @@ static int pospopenall(const char *fname, struct wr_cpt_posp *st)
 static int pospsethyper(struct wr_cpt_posp *st, uint16_t ib, uint16_t ir, uint16_t ic)
 {
 	return
-	H5Sselect_hyperslab(st->h3id, H5S_SELECT_SET, (hsize_t[3]) {ib, ir, ic}, NULL, st->l3id, NULL) < 0
+	H5Sselect_hyperslab(st->h3id, H5S_SELECT_SET, (hsize_t[3]) {ib,ir,ic}, NULL, st->l3id, NULL) < 0
 	||
-	H5Sselect_hyperslab(st->h2id, H5S_SELECT_SET, (hsize_t[2]) {ir, ic}, NULL, st->l2id, NULL) < 0;
+	H5Sselect_hyperslab(st->h2id, H5S_SELECT_SET, (hsize_t[2]) {ir,ic}, NULL, st->l2id, NULL) < 0;
 }
 
 /*  Load certain location POSP pixel  */
@@ -664,7 +670,6 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_p
 {
 	float    lonres, latres, diff, diffmin,
 	         ptgeodiff[ptcount], londiff, latdiff;
-	size_t   sparams = sizeof(double[8]);
 	uint8_t  appendpx, ipoint, npoint, npointmax, ivicinity,
 	         rownottop, rownotbottom, colnotleft, colnotright;
 	uint8_t *pointloc;
@@ -804,8 +809,8 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_p
 				ppoint = ppt->points + pointloc[ipoint];
 				ppairpoint = ppairpt->points + ipoint;
 				ppairpoint->seconds = ppoint->seconds;
-				ppairpoint->params = malloc(sparams);
-				memcpy(ppairpoint->params, ppoint->params, sparams);
+				ppairpoint->params = malloc(_cpt_parsz);
+				memcpy(ppairpoint->params, ppoint->params, _cpt_parsz);
 			}
 			
 			/*  Px init or reload  */
@@ -828,8 +833,11 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_p
 		}
 		
 		/*  Vicinity memory manage  */
-		if (ivicinity)
-			ppx->vicinity = realloc(ppx->vicinity, sizeof(struct cpt_pixel[ppx->nvicinity = ivicinity]));
+		if (ivicinity) {
+			ppx->vicinity = realloc(ppx->vicinity,
+			                        sizeof(struct cpt_pixel[ppx->nvicinity = ivicinity]));
+		}
+
 		
 		/*  Vicinity assignment  */
 		ivicinity = 0;
@@ -860,6 +868,107 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_p
 	return ptxcount;
 }
 
+/*  Safer implementation of write fn  */
+static ssize_t safewrite(int filedes, const void *buffer, size_t size)
+{
+	ssize_t ret;
+	
+	while ((ret = write(filedes, buffer, size)) > 0) {
+		if (ret >= size) {
+			return ret-size;
+		} else {
+			buffer += ret;
+			size   -= ret;
+		}
+	}
+	
+	return ret;
+}
+
+/*  Write pixel individual  */
+static int writepixel(int filedes, struct cpt_pixel *pixel)
+{
+	struct cpt_channel *pchannel;
+
+	/*  Geolocation  */
+	safewrite(filedes, &pixel->lon, _cpt_4byte);
+	safewrite(filedes, &pixel->lat, _cpt_4byte);
+	safewrite(filedes, &pixel->alt, _cpt_2byte);
+	safewrite(filedes, &pixel->mask, _cpt_1byte);
+	
+	/*  Dimensions  */
+	safewrite(filedes, &pixel->nchannel, _cpt_1byte);
+	safewrite(filedes, &pixel->nlayer, _cpt_1byte);
+	
+	/*  Channel  */
+	for (uint8_t ichannel = 0; ichannel < pixel->nchannel; ++ichannel) {
+		pchannel = pixel->channels+ichannel;
+		safewrite(filedes, &pchannel->centrewv, _cpt_2byte);
+		safewrite(filedes, pchannel->obs,
+		          sizeof(double[pixel->nlayer][(pchannel->centrewv < 0) ? 3 : 1]));
+		safewrite(filedes, pchannel->ang, sizeof(double[pixel->nlayer][4]));
+	}
+	pchannel = NULL;
+
+	return 0;
+}
+
+/*  Export struct to file  */
+static int writecpttofile(const char *fname, struct cpt_ff *st)
+{
+	uint8_t  ipoint, ivicinity;
+	uint16_t iptx;
+	int fd;
+	
+	/*  File already exist ?  */
+	fd = open(fname, O_PATH);
+	if (fd > 0) {
+		close(fd);
+#ifdef CPT_DEBUG
+		return EEXIST;
+#else
+		fd = open(fname, O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR);
+#endif
+	} else {
+		fd = open(fname, O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR);
+	}
+	
+	/*  Header  */
+	safewrite(fd, st->hdr->magic_number, CPT_MAGICLEN);
+	safewrite(fd, &st->hdr->ver, _cpt_1byte);
+	safewrite(fd, &st->hdr->nptx, _cpt_2byte);
+	safewrite(fd, &st->hdr->nparam, _cpt_1byte);
+	
+	/*  Data/Ptx  */
+	for (iptx = 0; iptx < st->hdr->nptx; ++iptx) {
+		
+		/*  Pt  */
+		safewrite(fd, &(st->data->pt+iptx)->lon, _cpt_4byte);
+		safewrite(fd, &(st->data->pt+iptx)->lat, _cpt_4byte);
+		safewrite(fd, &(st->data->pt+iptx)->alt, _cpt_2byte);
+		safewrite(fd, &(st->data->pt+iptx)->nt , _cpt_1byte);
+		for (ipoint = 0; ipoint < (st->data->pt+iptx)->nt; ++ ipoint) {
+			safewrite(fd, &((st->data->pt+iptx)->points+ipoint)->seconds, _cpt_8byte);
+			safewrite(fd, ((st->data->pt+iptx)->points+ipoint)->params, _cpt_parsz);
+		}
+		
+		/*  Px  */
+		safewrite(fd, &(st->data->px+iptx)->seconds, _cpt_8byte);
+		writepixel(fd, (st->data->px+iptx)->centrepixel);
+		safewrite(fd, &(st->data->px+iptx)->nvicinity, _cpt_1byte);
+		for (ivicinity = 0; ivicinity < (st->data->px+iptx)->nvicinity; ++ivicinity) {
+			writepixel(fd, (st->data->px+iptx)->vicinity+ivicinity);
+		}
+		
+	}
+	
+	/*  Ending  */
+	safewrite(fd, st->ending, CPT_ENDINGLEN);
+	close(fd);
+
+	return 0;
+}
+
 /*  Definition of main function  */
 int wrcpt(const char *ptname, const char *pxname, const char *cptname)
 {
@@ -869,6 +978,9 @@ int wrcpt(const char *ptname, const char *pxname, const char *cptname)
 	struct cpt_pt *pairpt;
 	struct cpt_px *pairpx;
 	struct wr_cpt_posp *pospst;
+	struct cpt_header hdr;
+	struct cpt_ptx ptx;
+	struct cpt_ff cptout;
 	
 	/*  Px prepare  */
 	pospinfoinit(pxname, &pospst);
@@ -889,17 +1001,38 @@ int wrcpt(const char *ptname, const char *pxname, const char *cptname)
 	
 	/*  Get paired Px and Pt  */
 	ptxcount = posppair(allpt, ptcount, pospst, &pairpx, &pairpt);
+#ifdef CPT_DEBUG
 	for (uint16_t i = 0; i < ptxcount; ++i) {
 		printf("No.%03d: lon %9.4f lat %8.4f with %2d points\n",
 		       i+1, (pairpx+i)->centrepixel->lon,
 		       (pairpx+i)->centrepixel->lat, (pairpt+i)->nt);
 	}
+#endif
+	
+	/*  Construct cpt  */
+	hdr.ver    = CPT_VERSION;
+	hdr.nptx   = ptxcount;
+	hdr.nparam = WR_CPT_NPARAM;
+	hdr.magic_number = CPT_MAGIC;
+	ptx.pt = pairpt;
+	ptx.px = pairpx;
+	cptout.hdr    = &hdr;
+	cptout.data   = &ptx;
+	cptout.ending = CPT_ENDING;
+	
+	/*  Write to file  */
+	writecpttofile(cptname, &cptout);
 	
 	/*  Cleanup  */
 	ret = cpt_freeptall(&allpt, ptcount);
 	ret = cpt_freepxall(&pairpx, ptxcount);
 	ret = cpt_freeptall(&pairpt, ptxcount);
 	ret = pospcleanst(&pospst);
+	
+	ptx.pt = NULL;
+	ptx.px = NULL;
+	cptout.hdr  = NULL;
+	cptout.data = NULL;
 	
 	return 0;
 }
