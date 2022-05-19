@@ -3,11 +3,9 @@
  *descreption:
  *  write cpt format file
  *arguements:
- *  [1]: downloaded in-situ aeronet file
- *  [2]: DPC/POSP data file
- *  [3]: output cpt
+ *  [1]: POSP hdf5 data file
  *init date: May/10/2022
- *last modify: May/18/2022
+ *last modify: May/19/2022
  *
  */
 
@@ -20,6 +18,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <math.h>
+
+#include <curl/curl.h>
 
 #include "hdf5.h"
 #include "../../read/readcpt.h"
@@ -68,6 +68,20 @@
 #define WR_CPT_INVALIDLAT(lat) ((lat < WR_CPT_LATLIM_MIN) || (lat > WR_CPT_LATLIM_MAX))
 
 #define WR_CPT_SECDIFFMAX ((uint64_t) 60*30)  /*  30 min  */
+
+#define WR_CPT_URLPREFIX "https://aeronet.gsfc.nasa.gov/cgi-bin/print_web_data_v3?"
+#define WR_CPT_DTFNAME   "aeronet_datatype.conf"
+#define WR_CPT_URLDTLEN  7
+#define WR_CPT_URLAVG    "AVG=10"
+#define WR_CPT_PTSUFFIX  "ptxt"
+#define WR_CPT_PTSUFLEN  strlen(WR_CPT_PTSUFFIX)
+#define WR_CPT_URLDT1LEN 33
+#define WR_CPT_URLDT2LEN 37
+#define WR_CPT_URLGEOLEN 49
+
+#define WR_CPT_CPTSUFFIX  "cpt"
+#define WR_CPT_CPTSUFLEN  strlen(WR_CPT_CPTSUFFIX)
+#define WR_CPT_H5FNAMELEN strlen("hdf5")
 
 struct wr_cpt_posp {
 	hid_t iid;   /*  entrance of intensity    */
@@ -122,14 +136,14 @@ const static size_t _cpt_parsz = sizeof(double[WR_CPT_NPARAM]);
 
 
 /*  Declaration of main function  */
-int wrcpt(const char *ptname, const char *pxname, const char *cptname);
+int wrcpt(const char *pxname);
 
 /*  Program entrance  */
 int main(int argc, char *argv[]) {
-	if (4 == argc) {
-		return wrcpt(argv[1], argv[2], argv[3]);
+	if (2 == argc) {
+		return wrcpt(argv[1]);
 	} else {
-		CPT_ERRECHOWITHTIME("Usage: %s sitefile satefile output", argv[0]);
+		CPT_ERRECHOWITHTIME("Usage: %s hdf5_file_name", argv[0]);
 		return WR_CPT_EINVARG;
 	}
 }
@@ -251,7 +265,7 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
 	
 	/*  Bad content  */
 	if ((flen = lseek(fd, 0, SEEK_END)) < WR_CPT_INVSITEBYTES) {
-		CPT_ERRECHOWITHTIME("%s contains NO valid site info\n", fname);
+		CPT_ERRECHOWITHTIME("%s contains NO valid site info", fname);
 		close(fd);
 		return WR_CPT_EINVSITE;
 	}
@@ -350,7 +364,7 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
 		
 		snprintf(rcddt, WR_CPT_DTLEN, "%s,%s", rcddate, rcdtime);
 		strptime(rcddt, "%d:%m:%Y,%H:%M:%S", &stm);
-		ppoint->seconds = mktime(&stm);
+		ppoint->seconds = timegm(&stm);
 		
 		pprev = ++pbuf;
 	} while (*pbuf != '\0');
@@ -518,21 +532,13 @@ static int pospinfoinit(const char *fname, struct wr_cpt_posp **pospst)
 {
 	int      fd;
 	char    *buffer, *pbuf, *pprev, *line, *pline;
-	char    *xmlfname;
 	char     dtbeg[WR_CPT_DTLEN], dtend[WR_CPT_DTLEN];
-	size_t   xmlnlen;
 	uint32_t flen, llen, maxlen;
 	struct tm stm;
 	
-	xmlfname = malloc(xmlnlen = strlen(fname)-1);
-	xmlnlen -= WR_CPT_XMLSUFLEN;
-	
-	memcpy(xmlfname, fname, xmlnlen);
-	memcpy(xmlfname+xmlnlen, WR_CPT_XMLSUFFIX, WR_CPT_XMLSUFLEN);
-	
 	/*  Try openning text file  */
-	if ((fd = open(xmlfname, O_RDONLY)) < 0) {
-		CPT_ERROPEN(xmlfname);
+	if ((fd = open(fname, O_RDONLY)) < 0) {
+		CPT_ERROPEN(fname);
 		return WR_CPT_EOPEN;
 	}
 	
@@ -578,30 +584,38 @@ static int pospinfoinit(const char *fname, struct wr_cpt_posp **pospst)
 		if (pline = strstr(line, WR_CPT_XMLSTTAG)) {
 			sscanf(pline, "%*[^'>']>%[^'<']", dtbeg);
 			strptime(dtbeg, "%Y-%m-%d %H:%M:%S", &stm);
-			(*pospst)->secswhenscan = mktime(&stm);
+			(*pospst)->secswhenscan = timegm(&stm);
 			goto next_line;
 		}
 		
 		/*  Ending time  */
 		if (pline = strstr(line, WR_CPT_XMLETTAG)) {
-			sscanf(pline, "%*[^'>']>%[^'<']", dtbeg);
-			strptime(dtbeg, "%Y-%m-%d %H:%M:%S", &stm);
-			(*pospst)->secswhenend = mktime(&stm);
+			sscanf(pline, "%*[^'>']>%[^'<']", dtend);
+			strptime(dtend, "%Y-%m-%d %H:%M:%S", &stm);
+			(*pospst)->secswhenend = timegm(&stm);
 			(*pospst)->secsperline = (*pospst)->secswhenend - (*pospst)->secswhenscan;
+			if (0 == (*pospst)->secsperline) {
+				CPT_ERRECHOWITHTIME("BAD time formatting!");
+				return WR_CPT_E;
+			}
 			goto next_line;
 		}
 		
+		/*
+		 *  The min/max lon/lat does NOT seems to appear inside the two tags,
+		 *  they should be found from entire lon/lat.
+		 */
+		#if 0
 		/*  Longitude bounds  */
 		if (pline = strstr(line, WR_CPT_XMLLONTAG)) {
-			//TODO
 			goto next_line;
 		}
 		
 		/*  Latitude bounds  */
 		if (pline = strstr(line, WR_CPT_XMLLATTAG)) {
-			//TODO
 			goto next_line;
 		}
+		#endif
 		
 		/*
 		 *  Number of col/row inside POSP XML does NOT corresponding
@@ -632,7 +646,7 @@ static int pospinfoinit(const char *fname, struct wr_cpt_posp **pospst)
 	
 	/*  Free allocated buffer  */
 	line = realloc(line, sizeof(char[maxlen]));
-	cpt_freethemall(3, &buffer, &line, &xmlfname);
+	cpt_freethemall(2, &buffer, &line);
 	
 	return 0;
 }
@@ -979,25 +993,144 @@ static int writecpttofile(const char *fname, struct cpt_ff *st)
 	return 0;
 }
 
-/*  Definition of main function  */
-int wrcpt(const char *ptname, const char *pxname, const char *cptname)
+/*
+ *  CURL part aims at downloading aeronet site file automatically.
+ *  fn write_data: callback of write fn when there is data received.
+ */
+static size_t write_data(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
-	int ret;
-	uint16_t  ptcount, ptxcount;
-	struct cpt_pt *allpt;
-	struct cpt_pt *pairpt;
+	return fwrite(ptr, size, nmemb, (FILE *)userdata);
+}
+
+/*
+ *  CURL part aims at downloading aeronet site file automatically.
+ *  fn downpt: download text from aeronet website.
+ */
+static int downpt(struct wr_cpt_posp *pospst, const char *ptfname)
+{
+	int   fd;
+	char *url, *dt, *dt1, *dt2, *bound;
+	FILE *fp;
+	CURL *curl_handle;
+	time_t sec;
+	struct tm *stm;
+	
+	/*  Get URL  */
+	if ((fd = open(WR_CPT_DTFNAME, O_RDONLY)) < 0) {
+		CPT_ERROPEN(WR_CPT_DTFNAME);
+		return WR_CPT_EOPEN;
+	}
+	dt = malloc(sizeof(int8_t[WR_CPT_URLDTLEN]));
+	read(fd, dt, WR_CPT_URLDTLEN);
+	close(fd);
+	
+	sec = pospst->secswhenscan - (time_t)60*30;
+	stm = gmtime(&sec);
+	dt1 = malloc(sizeof(int8_t[WR_CPT_URLDT1LEN]));
+	strftime(dt1, UINT8_MAX, "year=%Y&month=%m&day=%d&hour=%H", stm);
+	
+	sec = pospst->secswhenend  + (time_t)60*90;
+	stm = gmtime(&sec);
+	dt2 = malloc(sizeof(int8_t[WR_CPT_URLDT2LEN]));
+	strftime(dt2, UINT8_MAX, "year2=%Y&month2=%m&day2=%d&hour2=%H", stm);
+	
+	asprintf(&bound, "lon1=%07.2f&lon2=%07.2f&lat1=%06.2f&lat2=%06.2f",
+	         pospst->lonmin, pospst->lonmax, pospst->latmin, pospst->latmax);
+	
+	asprintf(&url, WR_CPT_URLPREFIX"%s&%s&%s&%s&%s",
+	         WR_CPT_URLAVG, dt, dt1, dt2, bound);
+	
+	/*  CURL part  */
+	curl_global_init(CURL_GLOBAL_ALL);
+	
+	/*  Init the curl session  */
+	curl_handle = curl_easy_init();
+	
+	/*  Set URL to get here  */
+	curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+
+#ifdef CPT_DEBUG
+	CPT_ECHOWITHTIME("download %s from %s", ptfname, url);
+#endif
+	
+	/*  Switch on/off full protocol/debug output while testing  */
+	curl_easy_setopt(curl_handle, CURLOPT_VERBOSE, 0L);
+	
+	/*  Disable/enable progress meter, set to 0L to enable it  */
+#ifdef CPT_DEBUG
+	curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 0L);
+#else
+	curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 1L);
+#endif
+	
+	/*  Send all data to this function  */
+	curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_data);
+	
+	/*  File already exist ?  */
+	fp = fopen(ptfname, "wb");
+	
+	/*  Write the page body to this file handle  */
+	curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, fp);
+	
+	/*  Get it!  */
+	curl_easy_perform(curl_handle);
+	
+	/*  Close the header file  */
+	fclose(fp);
+	
+	/*  Cleanup of heap  */
+	cpt_freethemall(5, &dt, &url, &dt1, &dt2, &bound);
+	
+	/*  Cleanup curl stuff  */
+	curl_easy_cleanup(curl_handle);
+	curl_global_cleanup();
+	
+	return 0;
+}
+
+/*  Definition of main function  */
+int wrcpt(const char *pxname)
+{
+	int   ret;
+	char *xmlfname, *ptxtfname, *cptfname;
+	size_t   fnamelen, fnamecpylen;
+	uint16_t ptcount, ptxcount;
+	struct cpt_pt *allpt,
+	              *pairpt;
 	struct cpt_px *pairpx;
-	struct wr_cpt_posp *pospst;
-	struct cpt_header hdr;
+	struct cpt_ff  cptout;
 	struct cpt_ptx ptx;
-	struct cpt_ff cptout;
+	struct cpt_header   hdr;
+	struct wr_cpt_posp *pospst;
+	
+	/*  Filename  */
+	fnamelen = strlen(pxname);
+	fnamecpylen = fnamelen-WR_CPT_H5FNAMELEN;
+	
+	xmlfname = malloc(fnamelen);
+	memcpy(xmlfname, pxname, fnamecpylen);
+	memcpy(xmlfname+fnamecpylen, WR_CPT_XMLSUFFIX, WR_CPT_XMLSUFLEN);
+	xmlfname[fnamelen-1] = '\0';
+	
+	ptxtfname = malloc(fnamelen+1);
+	memcpy(ptxtfname, pxname, fnamecpylen);
+	memcpy(ptxtfname+fnamecpylen, WR_CPT_PTSUFFIX, WR_CPT_PTSUFLEN);
+	ptxtfname[fnamelen] = '\0';
+	
+	cptfname = malloc(fnamelen);
+	memcpy(cptfname, pxname, fnamecpylen);
+	memcpy(cptfname+fnamecpylen, WR_CPT_CPTSUFFIX, WR_CPT_CPTSUFLEN);
+	cptfname[fnamelen-1] = '\0';
 	
 	/*  Px prepare  */
-	pospinfoinit(pxname, &pospst);
+	pospinfoinit(xmlfname, &pospst);
 	pospopenall(pxname, pospst);
 	
+	/*  Download site info locally  */
+	downpt(pospst, ptxtfname);
+	
 	/*  All Pt load  */
-	if (ret = querypt(ptname, &allpt, &ptcount)) {
+	if (ret = querypt(ptxtfname, &allpt, &ptcount)) {
 		cpt_freeptall(&allpt, ptcount);
 		return ret;
 	}
@@ -1013,9 +1146,9 @@ int wrcpt(const char *ptname, const char *pxname, const char *cptname)
 	ptxcount = posppair(allpt, ptcount, pospst, &pairpx, &pairpt);
 #ifdef CPT_DEBUG
 	for (uint16_t i = 0; i < ptxcount; ++i) {
-		printf("No.%03d: lon %9.4f lat %8.4f with %2d points\n",
-		       i+1, (pairpx+i)->centrepixel->lon,
-		       (pairpx+i)->centrepixel->lat, (pairpt+i)->nt);
+		CPT_ECHOWITHTIME("No.%03d: lon %9.4f lat %8.4f with %2d points",
+		                 i+1, (pairpx+i)->centrepixel->lon,
+		                 (pairpx+i)->centrepixel->lat, (pairpt+i)->nt);
 	}
 #endif
 	
@@ -1031,13 +1164,14 @@ int wrcpt(const char *ptname, const char *pxname, const char *cptname)
 	cptout.ending = CPT_ENDING;
 	
 	/*  Write to file  */
-	writecpttofile(cptname, &cptout);
+	writecpttofile(cptfname, &cptout);
 	
 	/*  Cleanup  */
 	ret = cpt_freeptall(&allpt, ptcount);
 	ret = cpt_freepxall(&pairpx, ptxcount);
 	ret = cpt_freeptall(&pairpt, ptxcount);
 	ret = pospcleanst(&pospst);
+	ret = cpt_freethemall(3, &xmlfname, &ptxtfname, &cptfname);
 	
 	ptx.pt = NULL;
 	ptx.px = NULL;
