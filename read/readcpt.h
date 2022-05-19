@@ -1,7 +1,7 @@
 /*
  *file: read/readcpt.h
  *init date: May/10/2022
- *last modify: May/18/2022
+ *last modify: May/19/2022
  *
  */
 
@@ -37,7 +37,7 @@
 struct cpt_header {
 	uint8_t  ver;
 	uint8_t  nparam;
-	uint16_t nptx;
+	uint32_t nptx;
 	uint8_t *magic_number;
 };
 
@@ -138,12 +138,12 @@ time_t curtime;
 
 
 /*  fn  */
-int cpt_readall(const char *fname, struct cpt_ptx *ptx, uint16_t *nptx, uint8_t *nparam);
+int cpt_readall(const char *fname, struct cpt_ptx *ptx, uint32_t *nptx, uint8_t *nparam);
 int readpixel(int filedes, struct cpt_pixel *pixel);
 int cpt_freethemall(uint8_t n, ...);
 int cpt_freepointall(struct cpt_point **p, uint16_t n);
-int cpt_freeptall(struct cpt_pt **p, uint16_t n);
+int cpt_freeptall(struct cpt_pt **p, uint32_t n);
 int cpt_freechannelall(struct cpt_channel **p, uint16_t n);
 int cpt_freepixelall(struct cpt_pixel **p, uint16_t n);
-int cpt_freepxall(struct cpt_px **p, uint16_t n);
+int cpt_freepxall(struct cpt_px **p, uint32_t n);
 

@@ -14,7 +14,7 @@ File format hierarchy:
        1 byte consists of 4 bits major version and 4 bits
        minor version. e.g. 10000110 corresponds version 8.6
     -Count of Ptx(ns):
-       2 bytes unsigned integer indicating number of Ptx,
+       4 bytes unsigned integer indicating number of Ptx,
        which is the fundamental component of Data,
        described in L24.
     -Count of parameters per Point(np):

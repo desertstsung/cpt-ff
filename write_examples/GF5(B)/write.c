@@ -187,7 +187,7 @@ int cpt_freepointall(struct cpt_point **p, uint16_t n)
 /*TODO move this fn to read/ dir
  *  Free one or more cpt_pt st pointer
  */
-int cpt_freeptall(struct cpt_pt **p, uint16_t n)
+int cpt_freeptall(struct cpt_pt **p, uint32_t n)
 {
 	if (*p) {
 		while (n-- > 0)
@@ -229,7 +229,7 @@ int cpt_freepixelall(struct cpt_pixel **p, uint16_t n)
 /*TODO move this fn to read/ dir
  *  Free one or more cpt_px st pointer
  */
-int cpt_freepxall(struct cpt_px **p, uint16_t n)
+int cpt_freepxall(struct cpt_px **p, uint32_t n)
 {
 	if (*p) {
 		while (n-- > 0) {
@@ -245,13 +245,14 @@ int cpt_freepxall(struct cpt_px **p, uint16_t n)
 /*
  *  Load site info into cpt_pt st
  */
-static int querypt(const char *fname, struct cpt_pt **allpt, uint16_t *ptcount)
+static int querypt(const char *fname, struct cpt_pt **allpt, uint32_t *ptcount)
 {
 	int      fd;
 	char    *buffer, *pbuf, *pprev, *line;
 	char     rcddate[WR_CPT_DATELEN], rcdtime[WR_CPT_TIMELEN], rcddt[WR_CPT_DTLEN];
-	float    lon, lat, alt, prevlon, prevlat;
+	float    lon, lat, prevlon, prevlat;
 	double   tparams[WR_CPT_NPARAM];
+	int16_t  alt;
 	uint32_t flen, llen, maxlen;
 	struct cpt_point *ppoint;
 	struct cpt_pt *ppt;
@@ -578,10 +579,10 @@ static int pospinfoinit(const char *fname, struct wr_cpt_posp **pospst)
 		memcpy(line, pprev, llen);
 		
 		/*  End of XML  */
-		if (pline = strstr(line, WR_CPT_XMLENDTAG)) break;
+		if ((pline = strstr(line, WR_CPT_XMLENDTAG))) break;
 		
 		/*  Start time  */
-		if (pline = strstr(line, WR_CPT_XMLSTTAG)) {
+		if ((pline = strstr(line, WR_CPT_XMLSTTAG))) {
 			sscanf(pline, "%*[^'>']>%[^'<']", dtbeg);
 			strptime(dtbeg, "%Y-%m-%d %H:%M:%S", &stm);
 			(*pospst)->secswhenscan = timegm(&stm);
@@ -589,7 +590,7 @@ static int pospinfoinit(const char *fname, struct wr_cpt_posp **pospst)
 		}
 		
 		/*  Ending time  */
-		if (pline = strstr(line, WR_CPT_XMLETTAG)) {
+		if ((pline = strstr(line, WR_CPT_XMLETTAG))) {
 			sscanf(pline, "%*[^'>']>%[^'<']", dtend);
 			strptime(dtend, "%Y-%m-%d %H:%M:%S", &stm);
 			(*pospst)->secswhenend = timegm(&stm);
@@ -679,7 +680,7 @@ static int pospcleanst(struct wr_cpt_posp **st)
 }
 
 /*  Pairing Pt and Px  */
-static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_posp *pospst,
+static uint32_t posppair(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_posp *pospst,
                          struct cpt_px **pairpx, struct cpt_pt **pairpt)
 {
 	float    lonres, latres, diff, diffmin,
@@ -688,8 +689,8 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_p
 	         rownottop, rownotbottom, colnotleft, colnotright;
 	uint8_t *pointloc;
 	int16_t  rowv, colv;
-	uint16_t row, col, rowlimit, collimit, ipt, iptnear, ptxcount;
-	uint32_t idx, idxv;
+	uint16_t row, col, rowlimit, collimit, ipt, iptnear;
+	uint32_t idx, ptxcount;
 	uint64_t linesec;
 	struct cpt_pt *ppt,
 	              *ppairpt;
@@ -744,9 +745,9 @@ static uint16_t posppair(struct cpt_pt *allpt, uint16_t ptcount, struct wr_cpt_p
 		 *  as lon/lat difference minimium threshold.
 		 */
 		lonres = 0;
-		if (colnotleft  = (col != 0))
+		if ((colnotleft  = (col != 0)))
 			lonres = fabsf(pospst->lon[idx-1] - pospst->lon[idx]);
-		if (colnotright = (col != collimit)) {
+		if ((colnotright = (col != collimit))) {
 			if (lonres) {
 				lonres += fabsf(pospst->lon[idx+1] - pospst->lon[idx]);
 				lonres /= 2;
@@ -932,7 +933,7 @@ static int writecpttofile(const char *fname, struct cpt_ff *st)
 {
 	int fd;
 	uint8_t  ipoint, ivicinity;
-	uint16_t iptx;
+	uint32_t iptx;
 	struct cpt_pt *ppt;
 	struct cpt_px *ppx;
 	struct cpt_point *ppoint;
@@ -953,7 +954,7 @@ static int writecpttofile(const char *fname, struct cpt_ff *st)
 	/*  Header  */
 	safewrite(fd, st->hdr->magic_number, CPT_MAGICLEN);
 	safewrite(fd, &st->hdr->ver, _cpt_1byte);
-	safewrite(fd, &st->hdr->nptx, _cpt_2byte);
+	safewrite(fd, &st->hdr->nptx, _cpt_4byte);
 	safewrite(fd, &st->hdr->nparam, _cpt_1byte);
 	
 	/*  Data/Ptx  */
@@ -1094,7 +1095,7 @@ int wrcpt(const char *pxname)
 	int   ret;
 	char *xmlfname, *ptxtfname, *cptfname;
 	size_t   fnamelen, fnamecpylen;
-	uint16_t ptcount, ptxcount;
+	uint32_t ptcount, ptxcount;
 	struct cpt_pt *allpt,
 	              *pairpt;
 	struct cpt_px *pairpx;
@@ -1130,7 +1131,7 @@ int wrcpt(const char *pxname)
 	downpt(pospst, ptxtfname);
 	
 	/*  All Pt load  */
-	if (ret = querypt(ptxtfname, &allpt, &ptcount)) {
+	if ((ret = querypt(ptxtfname, &allpt, &ptcount))) {
 		cpt_freeptall(&allpt, ptcount);
 		return ret;
 	}
@@ -1145,7 +1146,7 @@ int wrcpt(const char *pxname)
 	/*  Get paired Px and Pt  */
 	ptxcount = posppair(allpt, ptcount, pospst, &pairpx, &pairpt);
 #ifdef CPT_DEBUG
-	for (uint16_t i = 0; i < ptxcount; ++i) {
+	for (uint32_t i = 0; i < ptxcount; ++i) {
 		CPT_ECHOWITHTIME("No.%03d: lon %9.4f lat %8.4f with %2d points",
 		                 i+1, (pairpx+i)->centrepixel->lon,
 		                 (pairpx+i)->centrepixel->lat, (pairpt+i)->nt);

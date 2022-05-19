@@ -3,7 +3,7 @@
  *descreption:
  *  read cpt format file
  *init date: May/10/2022
- *last modify: May/18/2022
+ *last modify: May/19/2022
  *
  */
 
@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
 	}
 	
 	uint8_t  nparam;
-	uint16_t nptx;
+	uint32_t nptx;
 	struct cpt_ptx ptx;
 	
 	cpt_readall(argv[1], &ptx, &nptx, &nparam);
@@ -40,7 +40,7 @@ int main(int argc, char *argv[])
 }
 #endif
 
-int cpt_readall(const char *fname, struct cpt_ptx *ptx, uint16_t *nptx, uint8_t *nparam)
+int cpt_readall(const char *fname, struct cpt_ptx *ptx, uint32_t *nptx, uint8_t *nparam)
 {
 	int fd;
 	size_t  sparams;
@@ -74,7 +74,7 @@ int cpt_readall(const char *fname, struct cpt_ptx *ptx, uint16_t *nptx, uint8_t 
 	}
 	
 	/*  Meta info  */
-	read(fd, nptx, _cpt_2byte);
+	read(fd, nptx, _cpt_4byte);
 	read(fd, nparam, _cpt_1byte);
 	sparams = sizeof(double[*nparam]);
 	
@@ -198,7 +198,7 @@ int cpt_freepointall(struct cpt_point **p, uint16_t n)
 /*
  *  Free one or more cpt_pt st pointer
  */
-int cpt_freeptall(struct cpt_pt **p, uint16_t n)
+int cpt_freeptall(struct cpt_pt **p, uint32_t n)
 {
 	if (*p) {
 		while (n-- > 0)
@@ -240,7 +240,7 @@ int cpt_freepixelall(struct cpt_pixel **p, uint16_t n)
 /*
  *  Free one or more cpt_px st pointer
  */
-int cpt_freepxall(struct cpt_px **p, uint16_t n)
+int cpt_freepxall(struct cpt_px **p, uint32_t n)
 {
 	if (*p) {
 		while (n-- > 0) {
