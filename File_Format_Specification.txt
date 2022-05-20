@@ -63,7 +63,7 @@ File format hierarchy:
                are extra multiple(nl) 8 bytes Q and
                multiple(nl) 8 bytes U.
             -Scanning angles:
-               multiple(nl) 4 bytes single floating point
+               multiple(nl) 8 bytes single floating point
                number indicating solar zenithal angles,
                followed by viewing zenithal angles, solar
                azimuthal angles, and viewing azimuthal
