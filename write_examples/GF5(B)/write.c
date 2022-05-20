@@ -834,6 +834,7 @@ static uint32_t posppair(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_p
 			ppx->centrepixel = malloc(CPT_PIXELSIZE);
 			ppx->nvicinity   = 0;
 			ppx->vicinity    = NULL;
+			ppx->seconds     = linesec;
 		}
 		
 		/*  Centre pixel  */
