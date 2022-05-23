@@ -1,11 +1,21 @@
 /*
- *file: write_examples/GF5(B)/write.c
+ *file: write_examples/GF5(B)/posp.c
  *descreption:
- *  write cpt format file
+ *  write cpt format file from POSP sensor
+ *syntax:
+ *  a.out filename [options]
  *arguements:
- *  [1]: POSP hdf5 data file
+ *  filename: POSP hdf5 data file
+ *  options
+ *    -c, --create: use local ptxt file to create cpt file, avoid downloading from web.
+ *    -d, --download: ONLY download ptxt file, without creating cpt file.
+ *explanation:
+ *  `a.out filename` -> download and create
+ *  `a.out filename -c` -> ONLY create
+ *  `a.out filename -d` -> ONLY download
+ *  `a.out filename -c -d` or `a.out filename -cd` is PROHIBITED
  *init date: May/10/2022
- *last modify: May/20/2022
+ *last modify: May/23/2022
  *
  */
 
@@ -136,14 +146,23 @@ const static size_t _cpt_parsz = sizeof(double[WR_CPT_NPARAM]);
 
 
 /*  Declaration of main function  */
-int wrcpt(const char *pxname);
+int wrcpt(const char *pxname, uint8_t flag);
 
 /*  Program entrance  */
 int main(int argc, char *argv[]) {
 	if (2 == argc) {
-		return wrcpt(argv[1]);
+		return wrcpt(argv[1], 0b11);
+	} else if (3 == argc) {
+		uint8_t flag = 0b11;
+		if ((0 == strcmp(argv[2], "-d")) || (0 == strcmp(argv[2], "--download")))
+			flag = 0b01;
+		else if ((0 == strcmp(argv[2], "-c")) || (0 == strcmp(argv[2], "--create")))
+			flag = 0b10;
+		else
+			CPT_ERRECHOWITHTIME("Argument %s NOT recognized, using default mode", argv[2]);
+		return wrcpt(argv[1], flag);
 	} else {
-		CPT_ERRECHOWITHTIME("Usage: %s hdf5_file_name", argv[0]);
+		CPT_ERRECHOWITHTIME("Usage: %s posp_hdf5 [-c|-d]", argv[0]);
 		return WR_CPT_EINVARG;
 	}
 }
@@ -1091,15 +1110,15 @@ static int downpt(struct wr_cpt_posp *pospst, const char *ptfname)
 }
 
 /*  Definition of main function  */
-int wrcpt(const char *pxname)
+int wrcpt(const char *pxname, uint8_t flag)
 {
 	int   ret;
 	char *xmlfname, *ptxtfname, *cptfname;
 	size_t   fnamelen, fnamecpylen;
 	uint32_t ptcount, ptxcount;
-	struct cpt_pt *allpt,
-	              *pairpt;
-	struct cpt_px *pairpx;
+	struct cpt_pt *allpt  = NULL,
+	              *pairpt = NULL;
+	struct cpt_px *pairpx = NULL;
 	struct cpt_ff  cptout;
 	struct cpt_ptx ptx;
 	struct cpt_header   hdr;
@@ -1129,7 +1148,11 @@ int wrcpt(const char *pxname)
 	pospopenall(pxname, pospst);
 	
 	/*  Download site info locally  */
-	downpt(pospst, ptxtfname);
+	if (flag&0b01)
+		downpt(pospst, ptxtfname);
+	
+	if (!(flag>>1))
+		goto cleanup;
 	
 	/*  All Pt load  */
 	if ((ret = querypt(ptxtfname, &allpt, &ptcount))) {
@@ -1169,6 +1192,7 @@ int wrcpt(const char *pxname)
 	writecpttofile(cptfname, &cptout);
 	
 	/*  Cleanup  */
+	cleanup:
 	ret = cpt_freeptall(&allpt, ptcount);
 	ret = cpt_freepxall(&pairpx, ptxcount);
 	ret = cpt_freeptall(&pairpt, ptxcount);
