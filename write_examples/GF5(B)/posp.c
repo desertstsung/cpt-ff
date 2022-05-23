@@ -872,7 +872,6 @@ static uint32_t posppair(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_p
 			ppx->vicinity = realloc(ppx->vicinity,
 			                        sizeof(struct cpt_pixel[ppx->nvicinity = ivicinity]));
 		}
-
 		
 		/*  Vicinity assignment  */
 		ivicinity = 0;
