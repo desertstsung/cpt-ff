@@ -2,3 +2,5 @@ a.out
 *.o
 *.so
 build/
+dist/
+pycpt.egg-info/

@@ -3,17 +3,7 @@
  *descreption:
  *  write cpt format file from POSP sensor
  *syntax:
- *  a.out filename [options]
- *arguements:
- *  filename: POSP hdf5 data file
- *  options
- *    -c, --create: use local ptxt file to create cpt file, avoid downloading from web.
- *    -d, --download: ONLY download ptxt file, without creating cpt file.
- *explanation:
- *  `a.out filename` -> download and create
- *  `a.out filename -c` -> ONLY create
- *  `a.out filename -d` -> ONLY download
- *  `a.out filename -c -d` or `a.out filename -cd` is PROHIBITED
+ *  a.out hdf5 [ptxt, [cpt]]
  *init date: May/10/2022
  *last modify: May/23/2022
  *
@@ -146,23 +136,17 @@ const static size_t _cpt_parsz = sizeof(double[WR_CPT_NPARAM]);
 
 
 /*  Declaration of main function  */
-int wrcpt(const char *pxname, uint8_t flag);
+int wrcpt(const char *pxname, const char *ptxtfname, const char *cptfname);
 
 /*  Program entrance  */
 int main(int argc, char *argv[]) {
-	if (2 == argc) {
-		return wrcpt(argv[1], 0b11);
-	} else if (3 == argc) {
-		uint8_t flag = 0b11;
-		if ((0 == strcmp(argv[2], "-d")) || (0 == strcmp(argv[2], "--download")))
-			flag = 0b01;
-		else if ((0 == strcmp(argv[2], "-c")) || (0 == strcmp(argv[2], "--create")))
-			flag = 0b10;
-		else
-			CPT_ERRECHOWITHTIME("Argument %s NOT recognized, using default mode", argv[2]);
-		return wrcpt(argv[1], flag);
+	if (3 == argc) {
+		CPT_ECHOWITHTIME("Mode: download remote ptxt without creating cpt");
+		return wrcpt(argv[1], argv[2], NULL);
+	} else if (4 == argc) {
+		return wrcpt(argv[1], argv[2], argv[3]);
 	} else {
-		CPT_ERRECHOWITHTIME("Usage: %s posp_hdf5 [-c|-d]", argv[0]);
+		CPT_ERRECHOWITHTIME("Usage: %s hdf5 [ptxt, [cpt]]", argv[0]);
 		return WR_CPT_EINVARG;
 	}
 }
@@ -1109,10 +1093,10 @@ static int downpt(struct wr_cpt_posp *pospst, const char *ptfname)
 }
 
 /*  Definition of main function  */
-int wrcpt(const char *pxname, uint8_t flag)
+int wrcpt(const char *pxname, const char *ptxtfname, const char *cptfname)
 {
 	int   ret;
-	char *xmlfname, *ptxtfname, *cptfname;
+	char *xmlfname;
 	size_t   fnamelen, fnamecpylen;
 	uint32_t ptcount, ptxcount;
 	struct cpt_pt *allpt  = NULL,
@@ -1123,35 +1107,34 @@ int wrcpt(const char *pxname, uint8_t flag)
 	struct cpt_header   hdr;
 	struct wr_cpt_posp *pospst;
 	
-	/*  Filename  */
+	/*  XML filename  */
 	fnamelen = strlen(pxname);
 	fnamecpylen = fnamelen-WR_CPT_H5FNAMELEN;
-	
 	xmlfname = malloc(fnamelen);
 	memcpy(xmlfname, pxname, fnamecpylen);
 	memcpy(xmlfname+fnamecpylen, WR_CPT_XMLSUFFIX, WR_CPT_XMLSUFLEN);
 	xmlfname[fnamelen-1] = '\0';
 	
-	ptxtfname = malloc(fnamelen+1);
-	memcpy(ptxtfname, pxname, fnamecpylen);
-	memcpy(ptxtfname+fnamecpylen, WR_CPT_PTSUFFIX, WR_CPT_PTSUFLEN);
-	ptxtfname[fnamelen] = '\0';
-	
-	cptfname = malloc(fnamelen);
-	memcpy(cptfname, pxname, fnamecpylen);
-	memcpy(cptfname+fnamecpylen, WR_CPT_CPTSUFFIX, WR_CPT_CPTSUFLEN);
-	cptfname[fnamelen-1] = '\0';
-	
 	/*  Px prepare  */
 	pospinfoinit(xmlfname, &pospst);
 	pospopenall(pxname, pospst);
 	
-	/*  Download site info locally  */
-	if (flag&0b01)
+	/*  Whether download site info locally  */
+	if (cptfname) {
+		int fd = open(ptxtfname, O_PATH);
+		if (fd > 0) {
+			close(fd);
+			CPT_ECHOWITHTIME("Mode: using local ptxt %s to create cpt %s",
+			                 ptxtfname, cptfname);
+		} else {
+			CPT_ECHOWITHTIME("Mode: download remote ptxt %s to create cpt %s",
+			                 ptxtfname, cptfname);
+			downpt(pospst, ptxtfname);
+		}
+	} else {
 		downpt(pospst, ptxtfname);
-	
-	if (!(flag>>1))
 		goto cleanup;
+	}
 	
 	/*  All Pt load  */
 	if ((ret = querypt(ptxtfname, &allpt, &ptcount))) {
@@ -1196,7 +1179,7 @@ int wrcpt(const char *pxname, uint8_t flag)
 	ret = cpt_freepxall(&pairpx, ptxcount);
 	ret = cpt_freeptall(&pairpt, ptxcount);
 	ret = pospcleanst(&pospst);
-	ret = cpt_freethemall(3, &xmlfname, &ptxtfname, &cptfname);
+	CPT_FREE(xmlfname);
 	
 	ptx.pt = NULL;
 	ptx.px = NULL;
