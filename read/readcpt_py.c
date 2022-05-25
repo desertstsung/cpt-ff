@@ -76,7 +76,7 @@ static PyObject *cpt_readall_py(PyObject *self, PyObject *args)
 		for (ivicinity = 0; ivicinity < ppx->nvicinity; ++ivicinity) {
 			ppixel = ppx->vicinity+ivicinity;
 			pixeldict = PyDict_New();
-			//TODO setpixeldict(pixeldict, ppixel);
+			setpixeldict(pixeldict, ppixel);
 			
 			PyList_SetItem(vicilist, ivicinity, pixeldict);
 		}
