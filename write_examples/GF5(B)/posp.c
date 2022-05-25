@@ -37,6 +37,10 @@
 #define WR_CPT_POSPNBANDS  9
 #define WR_CPT_POSPDSNAME  "Data_Fields"
 #define WR_CPT_POSPGLNAME  "Geolocation_Fields"
+#define WR_CPT_POSPMINAME  "MetaInfo"
+#define WR_CPT_POSPSTNAME  "StartTime"
+#define WR_CPT_POSPETNAME  "EndTime"
+#define WR_CPT_POSPDTLEN   20
 #define WR_CPT_POSPINAME   "I"
 #define WR_CPT_POSPQNAME   "Q"
 #define WR_CPT_POSPUNAME   "U"
@@ -50,14 +54,6 @@
 #define WR_CPT_POSPVANAME  "View_Azim_Ang"
 #define WR_CPT_POSPCNTRWV  (int16_t[WR_CPT_POSPNBANDS]) \
                            {-380, -410, -443, -490, -670, -865, -1380, -1610, -2250}
-
-#define WR_CPT_XMLSUFFIX   "xml"
-#define WR_CPT_XMLSUFLEN   strlen(WR_CPT_XMLSUFFIX)
-#define WR_CPT_XMLENDTAG   "</ProductMetaData>"
-#define WR_CPT_XMLSTTAG    "StartTime"
-#define WR_CPT_XMLETTAG    "EndTime"
-#define WR_CPT_XMLLONTAG   "NadirLong"
-#define WR_CPT_XMLLATTAG   "NadirLat"
 
 #define WR_CPT_LONLIM_MIN  -180
 #define WR_CPT_LONLIM_MAX  180
@@ -386,12 +382,20 @@ static int querypt(const char *fname, struct cpt_pt **allpt, uint32_t *ptcount)
 }
 
 /*  Init st from POSP h5  */
-static int pospopenall(const char *fname, struct wr_cpt_posp *st)
+static int initpospst(const char *fname, struct wr_cpt_posp **pospst)
 {
+	char     dt[WR_CPT_POSPDTLEN];
 	hid_t    latid, lonid, space;
+	hid_t    miid, attrid, memtype;
 	size_t   size;
 	hsize_t  dim[2];
 	uint32_t index;
+	struct tm stm;
+	struct wr_cpt_posp *st;
+	
+	/*  Allocate memory  */
+	*pospst = malloc(sizeof(struct wr_cpt_posp));
+	st = *pospst;
 	
 	/*  Open h5 entrance  */
 	st->fid  = H5Fopen(fname, H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -424,7 +428,30 @@ static int pospopenall(const char *fname, struct wr_cpt_posp *st)
 	H5Dclose(latid);
 	H5Dclose(lonid);
 	
-	/*  Additional step  */
+	/*  Time  */
+	miid = H5Gopen(st->fid, WR_CPT_POSPMINAME, H5P_DEFAULT);
+	
+	attrid = H5Aopen(miid, WR_CPT_POSPSTNAME, H5P_DEFAULT);
+	memtype = H5Tcopy(H5T_C_S1);
+	H5Tset_size(memtype, WR_CPT_POSPDTLEN);
+	H5Aread(attrid, memtype, dt);
+	H5Aclose(attrid);
+	strptime(dt, "%Y-%m-%d %H:%M:%S", &stm);
+	st->secswhenscan = timegm(&stm);
+	
+	attrid = H5Aopen(miid, WR_CPT_POSPETNAME, H5P_DEFAULT);
+	H5Aread(attrid, memtype, dt);
+	H5Tclose(memtype);
+	H5Aclose(attrid);
+	H5Gclose(miid);
+	strptime(dt, "%Y-%m-%d %H:%M:%S", &stm);
+	st->secswhenend = timegm(&stm);
+	
+	st->secsperline = st->secswhenend - st->secswhenscan;
+	if (0 == st->secsperline) {
+		CPT_ERRECHOWITHTIME("BAD time formatting!");
+		return WR_CPT_E;
+	}
 	st->secsperline /= st->nrow;
 	
 	/*  Space for hyper-reading  */
@@ -454,6 +481,7 @@ static int pospopenall(const char *fname, struct wr_cpt_posp *st)
 		}
 	}
 	
+	st = NULL;
 	return 0;
 }
 
@@ -528,130 +556,6 @@ static int loadpxfromst(struct cpt_pixel *pixel, struct wr_cpt_posp *st,
 	
 	pchannel = NULL;
 
-	return 0;
-}
-
-/*  Init essential info from xml  */
-static int pospinfoinit(const char *fname, struct wr_cpt_posp **pospst)
-{
-	int      fd;
-	char    *buffer, *pbuf, *pprev, *line, *pline;
-	char     dtbeg[WR_CPT_DTLEN], dtend[WR_CPT_DTLEN];
-	uint32_t flen, llen, maxlen;
-	struct tm stm;
-	
-	/*  Try openning text file  */
-	if ((fd = open(fname, O_RDONLY)) < 0) {
-		CPT_ERROPEN(fname);
-		return WR_CPT_EOPEN;
-	}
-	
-	/*  Buffer all content  */
-	buffer = malloc(sizeof(char[flen = lseek(fd, 0, SEEK_END)]));
-	if (!buffer) {
-		CPT_ERRMEM(buffer);
-		return WR_CPT_EMEM;
-	}
-	pread(fd, buffer, flen, 0);
-	pprev = pbuf = buffer;
-	close(fd);
-	
-	line = NULL;
-	maxlen  = 1;
-	*pospst = malloc(sizeof(struct wr_cpt_posp));
-	
-	/*  Handle each line  */
-	do {
-		while (*++pbuf != '\n') ;
-		
-		llen = pbuf-pprev;
-		if (llen > maxlen)
-			line = realloc(line, sizeof(char[maxlen = llen]));
-		/*
-		 *  Set the rest of memory to 0 to avoid `strstr` return wrong value
-		 *  Wrong case without this fix:
-		 *    1. current line len(llen) is not greater than max line line(maxlen)
-		 *    2. buffer(line) remains the same as previous
-		 *    3. the front part of buffer(line) is replaced by newer line contents
-		 *    4. the end part of buffer(line) remains as previous
-		 *    5. needle substring happens to appear in the end part of previous one
-		 *    6. strstr return true, but needle don't really appear in this line of text
-		 */
-		else
-			memset(line+llen, 0, maxlen-llen);
-		memcpy(line, pprev, llen);
-		
-		/*  End of XML  */
-		if ((pline = strstr(line, WR_CPT_XMLENDTAG))) break;
-		
-		/*  Start time  */
-		if ((pline = strstr(line, WR_CPT_XMLSTTAG))) {
-			sscanf(pline, "%*[^'>']>%[^'<']", dtbeg);
-			strptime(dtbeg, "%Y-%m-%d %H:%M:%S", &stm);
-			(*pospst)->secswhenscan = timegm(&stm);
-			goto next_line;
-		}
-		
-		/*  Ending time  */
-		if ((pline = strstr(line, WR_CPT_XMLETTAG))) {
-			sscanf(pline, "%*[^'>']>%[^'<']", dtend);
-			strptime(dtend, "%Y-%m-%d %H:%M:%S", &stm);
-			(*pospst)->secswhenend = timegm(&stm);
-			(*pospst)->secsperline = (*pospst)->secswhenend - (*pospst)->secswhenscan;
-			if (0 == (*pospst)->secsperline) {
-				CPT_ERRECHOWITHTIME("BAD time formatting!");
-				return WR_CPT_E;
-			}
-			goto next_line;
-		}
-		
-		/*
-		 *  The min/max lon/lat does NOT seems to appear inside the two tags,
-		 *  they should be found from entire lon/lat.
-		 */
-		#if 0
-		/*  Longitude bounds  */
-		if (pline = strstr(line, WR_CPT_XMLLONTAG)) {
-			goto next_line;
-		}
-		
-		/*  Latitude bounds  */
-		if (pline = strstr(line, WR_CPT_XMLLATTAG)) {
-			goto next_line;
-		}
-		#endif
-		
-		/*
-		 *  Number of col/row inside POSP XML does NOT corresponding
-		 *  the self describing dimension inside its hdf5, sometimes.
-		 *  So this part of code is deprecated.
-		 */
-		#if 0
-		/*  N of row  */
-		if (pline = strstr(line, WR_CPT_XMLNRTAG)) {
-			sscanf(pline, "%*[^'>']>%hu", &pospst->nrow);
-			pospst->secsperline /= pospst->nrow;
-			if (!pospst->secsperline) pospst->secsperline = 1;
-			goto next_line;
-		}
-		
-		/*  N of col  */
-		if (pline = strstr(line, WR_CPT_XMLNCTAG)) {
-			sscanf(pline, "%*[^'>']>%hu", &pospst->ncol);
-			goto next_line;
-		}
-		#endif
-		next_line:
-		pprev = ++pbuf;
-	} while (*pbuf != '\0');
-	
-	/*  Set pointers to NULL  */
-	pbuf = pprev = pline = NULL;
-	
-	/*  Free allocated buffer  */
-	line = realloc(line, sizeof(char[maxlen]));
-	cpt_freethemall(2, &buffer, &line);
-	
 	return 0;
 }
 
@@ -1095,9 +999,7 @@ static int downpt(struct wr_cpt_posp *pospst, const char *ptfname)
 /*  Definition of main function  */
 int wrcpt(const char *pxname, const char *ptxtfname, const char *cptfname)
 {
-	int   ret;
-	char *xmlfname;
-	size_t   fnamelen, fnamecpylen;
+	int ret;
 	uint32_t ptcount, ptxcount;
 	struct cpt_pt *allpt  = NULL,
 	              *pairpt = NULL;
@@ -1107,17 +1009,8 @@ int wrcpt(const char *pxname, const char *ptxtfname, const char *cptfname)
 	struct cpt_header   hdr;
 	struct wr_cpt_posp *pospst;
 	
-	/*  XML filename  */
-	fnamelen = strlen(pxname);
-	fnamecpylen = fnamelen-WR_CPT_H5FNAMELEN;
-	xmlfname = malloc(fnamelen);
-	memcpy(xmlfname, pxname, fnamecpylen);
-	memcpy(xmlfname+fnamecpylen, WR_CPT_XMLSUFFIX, WR_CPT_XMLSUFLEN);
-	xmlfname[fnamelen-1] = '\0';
-	
 	/*  Px prepare  */
-	pospinfoinit(xmlfname, &pospst);
-	pospopenall(pxname, pospst);
+	initpospst(pxname, &pospst);
 	
 	/*  Whether download site info locally  */
 	if (cptfname) {
@@ -1179,7 +1072,6 @@ int wrcpt(const char *pxname, const char *ptxtfname, const char *cptfname)
 	ret = cpt_freepxall(&pairpx, ptxcount);
 	ret = cpt_freeptall(&pairpt, ptxcount);
 	ret = pospcleanst(&pospst);
-	CPT_FREE(xmlfname);
 	
 	ptx.pt = NULL;
 	ptx.px = NULL;
