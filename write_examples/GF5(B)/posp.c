@@ -5,7 +5,7 @@
  *syntax:
  *  a.out hdf5 [ptxt, [cpt]]
  *init date: May/10/2022
- *last modify: May/23/2022
+ *last modify: May/24/2022
  *
  */
 
