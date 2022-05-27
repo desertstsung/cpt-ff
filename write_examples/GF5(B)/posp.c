@@ -5,11 +5,13 @@
  *syntax:
  *  a.out hdf5 [ptxt, [cpt]]
  *init date: May/10/2022
- *last modify: May/25/2022
+ *last modify: May/27/2022
  *
  */
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
