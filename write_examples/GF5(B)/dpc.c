@@ -84,6 +84,7 @@
 #define WR_CPT_VALIDLAT(lat)      ((lat > WR_CPT_LATLIM_MIN) && (lat < WR_CPT_LATLIM_MAX))
 #define WR_CPT_VALIDGEO(lon, lat) (WR_CPT_VALIDLON(lon) && WR_CPT_VALIDLAT(lat))
 
+#define WR_CPT_SECDIFFMAX ((uint64_t) 60*30)  /*  30 min  */
 
 #define WR_CPT_URLPREFIX "https://aeronet.gsfc.nasa.gov/cgi-bin/print_web_data_v3?"
 #define WR_CPT_DTFNAME   "dpc_datatype.conf"
@@ -510,11 +511,11 @@ static int initfromh5(const char *prefix, struct wr_cpt_dpc *st)
 	
 	/*  Space for hyper-reading  */
 	st->h2id = H5Screate_simple(2, (hsize_t[2]) {st->nrow, st->ncol}, NULL);
-	st->h3id = H5Screate_simple(3, (hsize_t[3]) {WR_CPT_DPCNBANDS, st->nrow, st->ncol}, NULL);
+	st->h3id = H5Screate_simple(3, (hsize_t[3]) {st->nlayer, st->nrow, st->ncol}, NULL);
 	st->m2id = H5Screate_simple(1, (hsize_t[1]) {1}, NULL);
-	st->m3id = H5Screate_simple(1, (hsize_t[1]) {WR_CPT_DPCNBANDS}, NULL);
+	st->m3id = H5Screate_simple(1, (hsize_t[1]) {st->nlayer}, NULL);
 	
-	st->l3id[0] = WR_CPT_DPCNBANDS;
+	st->l3id[0] = st->nlayer;
 	st->l3id[1] = st->l3id[2] = 1;
 	st->l2id[0] = st->l2id[1] = 1;
 	
@@ -934,6 +935,64 @@ static int querysda(const char *fname, struct cpt_pt **allpt, uint32_t *ptcount)
 	return 0;
 }
 
+/*  Pairing Pt and Px  */
+static uint32_t pairdpc(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_dpc *dpcst,
+                        struct cpt_px **pairpx, struct cpt_pt **pairpt)
+{
+	uint8_t  ipoint, npoint, pointsta, pointend;
+	uint16_t row, col;
+	uint32_t ipt, idx, ptxcount;
+	uint64_t sec;
+	
+	struct cpt_pt    *ppt,    *ppairpt;
+	struct cpt_point *ppoint, *ppairpoint;
+	
+	const uint16_t rowlimit = dpcst->nrow-1,
+	               collimit = dpcst->ncol-1;
+	const float rowcoef = rowlimit / 2.f / WR_CPT_LATLIM_MAX,
+	            colcoef = collimit / 2.f / WR_CPT_LONLIM_MAX;
+	
+	ptxcount = 0;
+	for (ipt = 0; ipt < ptcount; ++ipt) {
+		ppt = allpt+ipt;
+		row = rowcoef * (WR_CPT_LATLIM_MAX-ppt->lat);
+		col = colcoef * (WR_CPT_LONLIM_MAX+ppt->lon);
+		idx = (uint32_t) row * dpcst->ncol + col;
+		
+		if (WR_CPT_INVALIDGEO(dpcst->lon[idx], dpcst->lat[idx]))
+			goto next_pt;
+		
+		sec = dpcst->secswhenscan + (rowlimit-row)*dpcst->secsperline;
+		
+		npoint = 0;
+		pointsta = 0;
+		pointend = 1;
+		for (ipoint = 0; ipoint < ppt->nt; ++ipoint) {
+			ppoint = ppt->points+ipoint;
+			if (((ppoint->seconds > sec) ?
+			(ppoint->seconds-sec) : (sec-ppoint->seconds)) < WR_CPT_SECDIFFMAX) {
+				++npoint;
+				if (pointsta)
+					pointend = ipoint+1;
+				else
+					pointsta = ipoint;
+			}
+		}
+		
+		if (!npoint)
+			goto next_pt;
+		else
+			++ptxcount;
+		
+		//TODO
+		
+		next_pt:
+		continue;
+	}
+	
+	return ptxcount;
+}
+
 /*  Definition of main function  */
 int wrcpt(const char *prefix, const char *ptxtfname, const char *cptfname)
 {
@@ -941,7 +1000,7 @@ int wrcpt(const char *prefix, const char *ptxtfname, const char *cptfname)
 	uint32_t ptcount, ptxcount;
 	struct cpt_pt *allpt  = NULL,
 	              *pairpt = NULL;
-/*	struct cpt_px *pairpx = NULL;*/
+	struct cpt_px *pairpx = NULL;
 /*	struct cpt_ff  cptout;*/
 /*	struct cpt_ptx ptx;*/
 /*	struct cpt_header   hdr;*/
@@ -981,14 +1040,14 @@ int wrcpt(const char *prefix, const char *ptxtfname, const char *cptfname)
 	}
 	
 	/*  Get paired Px and Pt  */
-/*	ptxcount = dpcpair(allpt, ptcount, dpcst, &pairpx, &pairpt);*/
-/*#ifdef CPT_DEBUG*/
-/*	for (uint32_t i = 0; i < ptxcount; ++i) {*/
-/*		CPT_ECHOWITHTIME("No.%03d: lon %9.4f lat %8.4f with %2d points",*/
-/*		                 i+1, (pairpx+i)->centrepixel->lon,*/
-/*		                 (pairpx+i)->centrepixel->lat, (pairpt+i)->nt);*/
-/*	}*/
-/*#endif*/
+	ptxcount = pairdpc(allpt, ptcount, dpcst, &pairpx, &pairpt);
+#ifdef CPT_DEBUG
+	for (uint32_t i = 0; i < ptxcount; ++i) {
+		CPT_ECHOWITHTIME("No.%03d: lon %9.4f lat %8.4f with %2d points",
+		                 i+1, (pairpx+i)->centrepixel->lon,
+		                 (pairpx+i)->centrepixel->lat, (pairpt+i)->nt);
+	}
+#endif
 	
 	/*  Construct cpt  */
 /*	hdr.ver    = CPT_VERSION;*/
@@ -1007,8 +1066,8 @@ int wrcpt(const char *prefix, const char *ptxtfname, const char *cptfname)
 	/*  Cleanup  */
 	cleanup:
 	ret = cpt_freeptall(&allpt, ptcount);
-/*	ret = cpt_freepxall(&pairpx, ptxcount);*/
-/*	ret = cpt_freeptall(&pairpt, ptxcount);*/
+	ret = cpt_freepxall(&pairpx, ptxcount);
+	ret = cpt_freeptall(&pairpt, ptxcount);
 	ret = cleandpcst(&dpcst);
 	
 /*	ptx.pt = NULL;*/
