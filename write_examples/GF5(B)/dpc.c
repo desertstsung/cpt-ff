@@ -39,10 +39,6 @@
 #define WR_CPT_DPCNBANDS  8
 #define WR_CPT_DPCDSNAME  "Data_Fields"
 #define WR_CPT_DPCGLNAME  "Geolocation_Fields"
-#define WR_CPT_DPCDTLEN   20
-#define WR_CPT_DPCINAME   "I"
-#define WR_CPT_DPCQNAME   "Q"
-#define WR_CPT_DPCUNAME   "U"
 #define WR_CPT_DPCLONNAME "Longitude"
 #define WR_CPT_DPCLATNAME "Latitude"
 #define WR_CPT_DPCSLNAME  "Sea_Land_Flags"
@@ -60,7 +56,6 @@
 #define WR_CPT_DPC765SUF  "_B765.h5"
 #define WR_CPT_DPC865SUF  "_B865.h5"
 #define WR_CPT_DPC910SUF  "_B910.h5"
-#define WR_CPT_DPCSUFLEN  strlen(WR_CPT_DPC443SUF)
 #define WR_CPT_DPCCNTRWV  (int16_t[WR_CPT_DPCNBANDS]) \
                            {443, -490, 565, -670, 763, 765, -865, 910}
 
@@ -101,7 +96,6 @@
 #define WR_CPT_URLGEOLEN 49
 
 #define WR_CPT_CPTSUFFIX  "cpt"
-#define WR_CPT_CPTSUFLEN  strlen(WR_CPT_CPTSUFFIX)
 
 struct wr_cpt_dpcband {
 	hid_t iid;   /*  entrance of intensity    */
