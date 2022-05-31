@@ -473,14 +473,14 @@ static int initpospst(const char *fname, struct wr_cpt_posp **pospst)
 		if (WR_CPT_INVALIDLON(st->lon[index]) || WR_CPT_INVALIDLAT(st->lat[index]))
 			continue;
 		
-		if ((st->lon[index] < st->lonmin) && (st->lat[index] < st->latmin)) {
+		if (st->lon[index] < st->lonmin)
 			st->lonmin = st->lon[index];
+		if (st->lat[index] < st->latmin)
 			st->latmin = st->lat[index];
-		}
-		if ((st->lon[index] > st->lonmax) && (st->lat[index] > st->latmax)) {
+		if (st->lon[index] > st->lonmax)
 			st->lonmax = st->lon[index];
+		if (st->lat[index] > st->latmax)
 			st->latmax = st->lat[index];
-		}
 	}
 	
 	st = NULL;
