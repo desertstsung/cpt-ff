@@ -51,6 +51,7 @@
 #define WR_CPT_DPCVZNAME  "View_Zen_Ang"
 #define WR_CPT_DPCSANAME  "Sol_Azim_Ang"
 #define WR_CPT_DPCVANAME  "View_Azim_Ang"
+#define WR_CPT_DPCSCLNAME "Scale_Factor"
 #define WR_CPT_DPC443SUF  "_B443.h5"
 #define WR_CPT_DPC490SUF  "_B490.h5"
 #define WR_CPT_DPC565SUF  "_B565.h5"
@@ -83,6 +84,9 @@
 #define WR_CPT_VALIDLON(lon)      ((lon > WR_CPT_LONLIM_MIN) && (lon < WR_CPT_LONLIM_MAX))
 #define WR_CPT_VALIDLAT(lat)      ((lat > WR_CPT_LATLIM_MIN) && (lat < WR_CPT_LATLIM_MAX))
 #define WR_CPT_VALIDGEO(lon, lat) (WR_CPT_VALIDLON(lon) && WR_CPT_VALIDLAT(lat))
+
+#define WR_CPT_VALIDMASK(mask) (mask <= 100)
+#define WR_CPT_VALIDALT(alt) ((alt < 10000) && (alt > -15000))
 
 #define WR_CPT_SECDIFFMAX ((uint64_t) 60*30)  /*  30 min  */
 
@@ -153,6 +157,8 @@ struct wr_cpt_dpc {
 	uint16_t ncol, nrow;    /*  count of row/col    */
 	uint32_t nelements;     /*  full elements       */
 	float    secsperline;   /*  timelapse per line  */
+	double   scaleobs;      /*  scale for obs       */
+	double   scaleang;      /*  scale for ang       */
 	uint64_t secswhenscan;  /*  timestamp of begin  */
 	uint64_t secswhenend;   /*  timestamp of end    */
 	float   *lon, *lat;     /*  full lon/lat        */
@@ -474,7 +480,9 @@ static int _initfromh5p(const char *fname, const char *namei, const char *nameq,
 /*  Init st from DPC h5  */
 static int initfromh5(const char *prefix, struct wr_cpt_dpc *st)
 {
+	hid_t attr;
 	char *fname;
+	float scale;
 	const size_t bufsize = sizeof(float[st->nelements]);
 	
 	/*  443  */
@@ -508,6 +516,17 @@ static int initfromh5(const char *prefix, struct wr_cpt_dpc *st)
 	/*  865  */
 	asprintf(&fname, "%s%s", prefix, WR_CPT_DPC865SUF);
 	_initfromh5p(fname, "I865P", "Q865P", "U865P", &st->b865, bufsize);
+	
+	/*  Scale Factor  */
+	attr = H5Aopen(st->b443.iid, WR_CPT_DPCSCLNAME, H5P_DEFAULT);
+	H5Aread(attr, H5T_NATIVE_FLOAT, &scale);
+	st->scaleobs = scale;
+	H5Aclose(attr);
+	
+	attr = H5Aopen(st->b443.szid, WR_CPT_DPCSCLNAME, H5P_DEFAULT);
+	H5Aread(attr, H5T_NATIVE_FLOAT, &scale);
+	st->scaleang = scale;
+	H5Aclose(attr);
 	
 	/*  Space for hyper-reading  */
 	st->h2id = H5Screate_simple(2, (hsize_t[2]) {st->nrow, st->ncol}, NULL);
@@ -557,14 +576,14 @@ static int initfromh5(const char *prefix, struct wr_cpt_dpc *st)
 			continue;
 		}
 		
-		if ((st->lon[index] < st->lonmin) && (st->lat[index] < st->latmin)) {
+		if (st->lon[index] < st->lonmin)
 			st->lonmin = st->lon[index];
+		if (st->lat[index] < st->latmin)
 			st->latmin = st->lat[index];
-		}
-		if ((st->lon[index] > st->lonmax) && (st->lat[index] > st->latmax)) {
+		if (st->lon[index] > st->lonmax)
 			st->lonmax = st->lon[index];
+		if (st->lat[index] > st->latmax)
 			st->latmax = st->lat[index];
-		}
 	}
 	
 	CPT_FREE(fname);
@@ -935,16 +954,187 @@ static int querysda(const char *fname, struct cpt_pt **allpt, uint32_t *ptcount)
 	return 0;
 }
 
+/*  Set hyper space before read partial DPC data  */
+static int setdpchyper(struct wr_cpt_dpc *st, uint16_t ir, uint16_t ic)
+{
+	return
+	H5Sselect_hyperslab(st->h3id, H5S_SELECT_SET, (hsize_t[3]) {0,ir,ic}, NULL, st->l3id, NULL) < 0
+	||
+	H5Sselect_hyperslab(st->h2id, H5S_SELECT_SET, (hsize_t[2]) {ir,ic}, NULL, st->l2id, NULL) < 0;
+}
+
+/*  Load certain channel  */
+static int loadchannel(struct wr_cpt_dpc *st, struct wr_cpt_dpcband *pb, struct cpt_channel *pc,
+                       uint8_t *mask, int16_t *alt, uint8_t *masknset, uint8_t *altnset)
+{
+	uint8_t   ilayer;
+	int16_t  *obs;
+	uint16_t *ang;
+	
+	if (*masknset) {
+		H5Dread(pb->sid, H5T_NATIVE_UINT8, st->m2id,
+		        st->h2id, H5P_DEFAULT, mask);
+		if (WR_CPT_VALIDMASK(*mask))
+			*masknset = 0;
+	}
+	if (*altnset) {
+		H5Dread(pb->aid, H5T_NATIVE_INT16, st->m2id,
+		        st->h2id, H5P_DEFAULT, alt);
+		if (WR_CPT_VALIDALT(*alt))
+			*altnset = 0;
+	}
+	
+	ang = malloc(sizeof(int16_t[st->nlayer]));
+	
+	H5Dread(pb->szid, H5T_NATIVE_UINT16, st->m3id, st->h3id, H5P_DEFAULT, ang);
+	for (ilayer = 0; ilayer < st->nlayer; ++ilayer)
+		pc->ang[ilayer] = st->scaleang * ang[ilayer];
+	
+	H5Dread(pb->vzid, H5T_NATIVE_UINT16, st->m3id, st->h3id, H5P_DEFAULT, ang);
+	for (ilayer = 0; ilayer < st->nlayer; ++ilayer)
+		pc->ang[ilayer + st->nlayer] = st->scaleang * ang[ilayer];
+	
+	H5Dread(pb->said, H5T_NATIVE_UINT16, st->m3id, st->h3id, H5P_DEFAULT, ang);
+	for (ilayer = 0; ilayer < st->nlayer; ++ilayer)
+		pc->ang[ilayer + 2*st->nlayer] = st->scaleang * ang[ilayer];
+	
+	H5Dread(pb->vaid, H5T_NATIVE_UINT16, st->m3id, st->h3id, H5P_DEFAULT, ang);
+	for (ilayer = 0; ilayer < st->nlayer; ++ilayer)
+		pc->ang[ilayer + 3*st->nlayer] = st->scaleang * ang[ilayer];
+	
+	CPT_FREE(ang);
+	obs = malloc(sizeof(int16_t[st->nlayer]));
+	
+	H5Dread(pb->iid, H5T_NATIVE_INT16, st->m3id, st->h3id, H5P_DEFAULT, obs);
+	for (ilayer = 0; ilayer < st->nlayer; ++ilayer)
+		pc->obs[ilayer] = st->scaleobs * obs[ilayer];
+	
+	CPT_FREE(obs);
+	
+	return 0;
+}
+
+/*  Load certain polar channel  */
+static int loadchannelp(struct wr_cpt_dpc *st, struct wr_cpt_dpcbandp *pb, struct cpt_channel *pc,
+                        uint8_t *mask, int16_t *alt, uint8_t *masknset, uint8_t *altnset)
+{
+	uint8_t   ilayer;
+	int16_t  *obs;
+	uint16_t *ang;
+	
+	if (*masknset) {
+		H5Dread(pb->sid, H5T_NATIVE_UINT8, st->m2id,
+		        st->h2id, H5P_DEFAULT, mask);
+		if (WR_CPT_VALIDMASK(*mask))
+			*masknset = 0;
+	}
+	if (*altnset) {
+		H5Dread(pb->aid, H5T_NATIVE_INT16, st->m2id,
+		        st->h2id, H5P_DEFAULT, alt);
+		if (WR_CPT_VALIDALT(*alt))
+			*altnset = 0;
+	}
+	
+	ang = malloc(sizeof(int16_t[st->nlayer]));
+	
+	H5Dread(pb->szid, H5T_NATIVE_UINT16, st->m3id, st->h3id, H5P_DEFAULT, ang);
+	for (ilayer = 0; ilayer < st->nlayer; ++ilayer)
+		pc->ang[ilayer] = st->scaleang * ang[ilayer];
+	
+	H5Dread(pb->vzid, H5T_NATIVE_UINT16, st->m3id, st->h3id, H5P_DEFAULT, ang);
+	for (ilayer = 0; ilayer < st->nlayer; ++ilayer)
+		pc->ang[ilayer + st->nlayer] = st->scaleang * ang[ilayer];
+	
+	H5Dread(pb->said, H5T_NATIVE_UINT16, st->m3id, st->h3id, H5P_DEFAULT, ang);
+	for (ilayer = 0; ilayer < st->nlayer; ++ilayer)
+		pc->ang[ilayer + 2*st->nlayer] = st->scaleang * ang[ilayer];
+	
+	H5Dread(pb->vaid, H5T_NATIVE_UINT16, st->m3id, st->h3id, H5P_DEFAULT, ang);
+	for (ilayer = 0; ilayer < st->nlayer; ++ilayer)
+		pc->ang[ilayer + 3*st->nlayer] = st->scaleang * ang[ilayer];
+	
+	CPT_FREE(ang);
+	obs = malloc(sizeof(int16_t[st->nlayer]));
+	
+	H5Dread(pb->iid, H5T_NATIVE_INT16, st->m3id, st->h3id, H5P_DEFAULT, obs);
+	for (ilayer = 0; ilayer < st->nlayer; ++ilayer)
+		pc->obs[ilayer] = st->scaleobs * obs[ilayer];
+	
+	H5Dread(pb->qid, H5T_NATIVE_INT16, st->m3id, st->h3id, H5P_DEFAULT, obs);
+	for (ilayer = 0; ilayer < st->nlayer; ++ilayer)
+		pc->obs[ilayer + st->nlayer] = st->scaleobs * obs[ilayer];
+	
+	H5Dread(pb->uid, H5T_NATIVE_INT16, st->m3id, st->h3id, H5P_DEFAULT, obs);
+	for (ilayer = 0; ilayer < st->nlayer; ++ilayer)
+		pc->obs[ilayer + 2*st->nlayer] = st->scaleobs * obs[ilayer];
+	
+	CPT_FREE(obs);
+	
+	return 0;
+}
+
+/*  Load certain location DPC pixel  */
+static int loadpxfromst(struct cpt_pixel *pixel, struct wr_cpt_dpc *st, uint16_t ir, uint16_t ic)
+{
+	uint8_t  ispolar, masknset, altnset;
+	struct cpt_channel *pchannel;
+	
+	const uint32_t idx = (uint32_t) ir*st->ncol+ic;
+	const void *bands[WR_CPT_DPCNBANDS] = {&st->b443, &st->b490, &st->b565, &st->b670,
+	                                       &st->b763, &st->b765, &st->b865, &st->b910};
+	
+	pixel->lon = st->lon[idx];
+	pixel->lat = st->lat[idx];
+	
+	pixel->nlayer   = st->nlayer;
+	pixel->nchannel = WR_CPT_DPCNBANDS;
+	
+	/*  Set hyperslab  */
+	setdpchyper(st, ir, ic);
+	masknset = altnset = 1;
+	
+	/*  Load channels  */
+	pixel->channels = malloc(sizeof(struct cpt_channel[pixel->nchannel]));
+	for (uint16_t channel = 0; channel < pixel->nchannel; ++channel) {
+		pchannel = pixel->channels+channel;
+		pchannel->centrewv = WR_CPT_DPCCNTRWV[channel];
+		ispolar = pchannel->centrewv < 0;
+		
+		/*
+		 *  Allocate memory
+		 *  4 stands for sz, vz, sa and va
+		 *  3 stands for I/Q/U
+		 */
+		pchannel->ang = malloc(sizeof(double[pixel->nlayer][4]));
+		pchannel->obs = malloc(sizeof(double[pixel->nlayer][ispolar ? 3 : 1]));
+		
+		if (ispolar) {
+			loadchannelp(st, (struct wr_cpt_dpcbandp *) bands[channel],
+			             pchannel, &pixel->mask, &pixel->alt, &masknset, &altnset);
+		} else {
+			loadchannel(st, (struct wr_cpt_dpcband *) bands[channel],
+			            pchannel, &pixel->mask, &pixel->alt, &masknset, &altnset);
+		}
+	}
+	
+	pchannel = NULL;
+
+	return 0;
+}
+
 /*  Pairing Pt and Px  */
 static uint32_t pairdpc(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_dpc *dpcst,
                         struct cpt_px **pairpx, struct cpt_pt **pairpt)
 {
-	uint8_t  ipoint, npoint, pointsta, pointend;
+	uint8_t  ipoint, npoint, pointsta, ivicinity,
+	         rowntop, rownbottom, colnleft, colnright;
+	int16_t  rowv, colv;
 	uint16_t row, col;
 	uint32_t ipt, idx, ptxcount;
 	uint64_t sec;
 	
 	struct cpt_pt    *ppt,    *ppairpt;
+	struct cpt_px    *ppx;
 	struct cpt_point *ppoint, *ppairpoint;
 	
 	const uint16_t rowlimit = dpcst->nrow-1,
@@ -953,6 +1143,8 @@ static uint32_t pairdpc(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_dp
 	            colcoef = collimit / 2.f / WR_CPT_LONLIM_MAX;
 	
 	ptxcount = 0;
+	*pairpx  = NULL;
+	*pairpt  = NULL;
 	for (ipt = 0; ipt < ptcount; ++ipt) {
 		ppt = allpt+ipt;
 		row = rowcoef * (WR_CPT_LATLIM_MAX-ppt->lat);
@@ -964,33 +1156,199 @@ static uint32_t pairdpc(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_dp
 		
 		sec = dpcst->secswhenscan + (rowlimit-row)*dpcst->secsperline;
 		
-		npoint = 0;
+		npoint   = 0;
 		pointsta = 0;
-		pointend = 1;
 		for (ipoint = 0; ipoint < ppt->nt; ++ipoint) {
 			ppoint = ppt->points+ipoint;
 			if (((ppoint->seconds > sec) ?
 			(ppoint->seconds-sec) : (sec-ppoint->seconds)) < WR_CPT_SECDIFFMAX) {
 				++npoint;
-				if (pointsta)
-					pointend = ipoint+1;
-				else
+				if (!pointsta)
 					pointsta = ipoint;
 			}
 		}
 		
 		if (!npoint)
 			goto next_pt;
-		else
-			++ptxcount;
 		
-		//TODO
+		/*  Pt  */
+		*pairpt = realloc(*pairpt, sizeof(struct cpt_pt[++ptxcount]));
+		ppairpt = *pairpt + ptxcount-1;
+		ppairpt->nt  = npoint;
+		ppairpt->alt = ppt->alt;
+		ppairpt->lon = ppt->lon;
+		ppairpt->lat = ppt->lat;
+		ppairpt->points = malloc(sizeof(struct cpt_point[ppairpt->nt]));
+		for (ipoint = 0; ipoint < npoint; ++ipoint) {
+			ppoint = ppt->points + pointsta + ipoint;
+			ppairpoint = ppairpt->points + ipoint;
+			ppairpoint->seconds = ppoint->seconds;
+			ppairpoint->params  = malloc(_cpt_parsz);
+			memcpy(ppairpoint->params, ppoint->params, _cpt_parsz);
+		}
+		
+		/*  Px  */
+		*pairpx = realloc(*pairpx, sizeof(struct cpt_px[ptxcount]));
+		ppx = *pairpx + ptxcount-1;
+		ppx->centrepixel = malloc(CPT_PIXELSIZE);
+		ppx->seconds     = sec;
+		
+		/*  Centre pixel  */
+		loadpxfromst(ppx->centrepixel, dpcst, row, col);
+		
+		/*  Vicinity count  */
+		rowntop    = (row != 0);
+		rownbottom = (row != rowlimit);
+		colnleft   = (col != 0);
+		colnright  = (col != collimit);
+		switch (rowntop+rownbottom+colnleft+colnright) {
+		case 4: ppx->nvicinity = 8; break;
+		case 3: ppx->nvicinity = 5; break;
+		case 2: ppx->nvicinity = 3; break;
+		default: ppx->nvicinity = 0;
+		}
+		
+		/*  Vicinity memory manage  */
+		if (ppx->nvicinity)
+			ppx->vicinity = malloc(sizeof(struct cpt_pixel[ppx->nvicinity]));
+		else
+			ppx->vicinity = NULL;
+		
+		/*  Vicinity assignment  */
+		ivicinity = 0;
+		for (rowv = -1; rowv < 2; ++rowv) {
+			if (((-1 == rowv) && !rowntop) || ((1 == rowv) && !rownbottom))
+				continue;
+			for (colv = -1; colv < 2; ++colv) {
+				if (((-1 == colv) && !colnleft) || ((1 == colv) && !colnright))
+					continue;
+				/*  Centre pixel already load before  */
+				if ((0 == rowv) && (0 == colv))
+					continue;
+				loadpxfromst(ppx->vicinity+ivicinity++, dpcst, row+rowv, col+colv);
+			}
+		}
 		
 		next_pt:
 		continue;
 	}
 	
+	ppx = NULL;
+	ppt = ppairpt = NULL;
+	ppoint = ppairpoint = NULL;
+	
 	return ptxcount;
+}
+
+/*  Safer implementation of write fn  */
+static ssize_t safewrite(int filedes, const void *buffer, size_t size)
+{
+	ssize_t ret;
+	
+	while ((ret = write(filedes, buffer, size)) > 0) {
+		if (ret >= size) {
+			return ret-size;
+		} else {
+			buffer += ret;
+			size   -= ret;
+		}
+	}
+	
+	return ret;
+}
+
+/*  Write pixel individual  */
+static int writepixel(int filedes, struct cpt_pixel *pixel)
+{
+	struct cpt_channel *pchannel;
+
+	/*  Geolocation  */
+	safewrite(filedes, &pixel->lon, _cpt_4byte);
+	safewrite(filedes, &pixel->lat, _cpt_4byte);
+	safewrite(filedes, &pixel->alt, _cpt_2byte);
+	safewrite(filedes, &pixel->mask, _cpt_1byte);
+	
+	/*  Dimensions  */
+	safewrite(filedes, &pixel->nchannel, _cpt_1byte);
+	safewrite(filedes, &pixel->nlayer, _cpt_1byte);
+	
+	/*  Channel  */
+	for (uint8_t ichannel = 0; ichannel < pixel->nchannel; ++ichannel) {
+		pchannel = pixel->channels+ichannel;
+		safewrite(filedes, &pchannel->centrewv, _cpt_2byte);
+		safewrite(filedes, pchannel->obs,
+		          sizeof(double[pixel->nlayer][(pchannel->centrewv < 0) ? 3 : 1]));
+		safewrite(filedes, pchannel->ang, sizeof(double[pixel->nlayer][4]));
+	}
+	pchannel = NULL;
+
+	return 0;
+}
+
+/*  Export struct to file  */
+static int writecpttofile(const char *fname, struct cpt_ff *st)
+{
+	int fd;
+	uint8_t  ipoint, ivicinity;
+	uint32_t iptx;
+	struct cpt_pt *ppt;
+	struct cpt_px *ppx;
+	struct cpt_point *ppoint;
+	
+	/*  File already exist ?  */
+	fd = open(fname, O_PATH);
+	if (fd > 0) {
+		close(fd);
+#ifdef CPT_DEBUG
+		fd = open(fname, O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR);
+#else
+		return EEXIST;
+#endif
+	} else {
+		fd = open(fname, O_WRONLY|O_CREAT, S_IRUSR|S_IWUSR);
+	}
+	
+	/*  Header  */
+	safewrite(fd, st->hdr->magic_number, CPT_MAGICLEN);
+	safewrite(fd, &st->hdr->ver, _cpt_1byte);
+	safewrite(fd, &st->hdr->nptx, _cpt_4byte);
+	safewrite(fd, &st->hdr->nparam, _cpt_1byte);
+	
+	/*  Data/Ptx  */
+	for (iptx = 0; iptx < st->hdr->nptx; ++iptx) {
+		
+		/*  Pt  */
+		ppt = st->data->pt+iptx;
+		safewrite(fd, &ppt->lon, _cpt_4byte);
+		safewrite(fd, &ppt->lat, _cpt_4byte);
+		safewrite(fd, &ppt->alt, _cpt_2byte);
+		safewrite(fd, &ppt->nt , _cpt_1byte);
+		for (ipoint = 0; ipoint < ppt->nt; ++ipoint) {
+			ppoint = ppt->points+ipoint;
+			safewrite(fd, &ppoint->seconds, _cpt_8byte);
+			safewrite(fd, ppoint->params, _cpt_parsz);
+		}
+		
+		/*  Px  */
+		ppx = st->data->px+iptx;
+		safewrite(fd, &ppx->seconds, _cpt_8byte);
+		writepixel(fd, ppx->centrepixel);
+		safewrite(fd, &ppx->nvicinity, _cpt_1byte);
+		for (ivicinity = 0; ivicinity < ppx->nvicinity; ++ivicinity) {
+			writepixel(fd, ppx->vicinity+ivicinity);
+		}
+		
+	}
+	
+	/*  Ending  */
+	safewrite(fd, st->ending, CPT_ENDINGLEN);
+	close(fd);
+	
+	ppt = NULL;
+	ppx = NULL;
+	ppoint = NULL;
+
+	return 0;
 }
 
 /*  Definition of main function  */
@@ -1001,9 +1359,9 @@ int wrcpt(const char *prefix, const char *ptxtfname, const char *cptfname)
 	struct cpt_pt *allpt  = NULL,
 	              *pairpt = NULL;
 	struct cpt_px *pairpx = NULL;
-/*	struct cpt_ff  cptout;*/
-/*	struct cpt_ptx ptx;*/
-/*	struct cpt_header   hdr;*/
+	struct cpt_ff  cptout;
+	struct cpt_ptx ptx;
+	struct cpt_header  hdr;
 	struct wr_cpt_dpc *dpcst;
 	
 	/*  Px prepare  */
@@ -1050,18 +1408,18 @@ int wrcpt(const char *prefix, const char *ptxtfname, const char *cptfname)
 #endif
 	
 	/*  Construct cpt  */
-/*	hdr.ver    = CPT_VERSION;*/
-/*	hdr.nptx   = ptxcount;*/
-/*	hdr.nparam = WR_CPT_NPARAM;*/
-/*	hdr.magic_number = CPT_MAGIC;*/
-/*	ptx.pt = pairpt;*/
-/*	ptx.px = pairpx;*/
-/*	cptout.hdr    = &hdr;*/
-/*	cptout.data   = &ptx;*/
-/*	cptout.ending = CPT_ENDING;*/
+	hdr.ver    = CPT_VERSION;
+	hdr.nptx   = ptxcount;
+	hdr.nparam = WR_CPT_NPARAM;
+	hdr.magic_number = CPT_MAGIC;
+	ptx.pt = pairpt;
+	ptx.px = pairpx;
+	cptout.hdr    = &hdr;
+	cptout.data   = &ptx;
+	cptout.ending = CPT_ENDING;
 	
 	/*  Write to file  */
-/*	writecpttofile(cptfname, &cptout);*/
+	writecpttofile(cptfname, &cptout);
 	
 	/*  Cleanup  */
 	cleanup:
@@ -1070,13 +1428,11 @@ int wrcpt(const char *prefix, const char *ptxtfname, const char *cptfname)
 	ret = cpt_freeptall(&pairpt, ptxcount);
 	ret = cleandpcst(&dpcst);
 	
-/*	ptx.pt = NULL;*/
-/*	ptx.px = NULL;*/
-/*	cptout.hdr  = NULL;*/
-/*	cptout.data = NULL;*/
+	ptx.pt = NULL;
+	ptx.px = NULL;
+	cptout.hdr  = NULL;
+	cptout.data = NULL;
 	
 	return 0;
 }
-
-
 

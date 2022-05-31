@@ -733,7 +733,7 @@ static uint32_t posppair(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_p
 				ppoint = ppt->points + pointloc[ipoint];
 				ppairpoint = ppairpt->points + ipoint;
 				ppairpoint->seconds = ppoint->seconds;
-				ppairpoint->params = malloc(_cpt_parsz);
+				ppairpoint->params  = malloc(_cpt_parsz);
 				memcpy(ppairpoint->params, ppoint->params, _cpt_parsz);
 			}
 			
