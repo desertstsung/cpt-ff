@@ -5,7 +5,7 @@
  *syntax:
  *  a.out DPC_prefix [ptxt, [cpt]]
  *init date: May/27/2022
- *last modify: May/30/2022
+ *last modify: Jun/1/2022
  *
  */
 
