@@ -1151,13 +1151,13 @@ static uint32_t pairdpc(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_dp
 		sec = dpcst->secswhenscan + (rowlimit-row)*dpcst->secsperline;
 		
 		npoint   = 0;
-		pointsta = 0;
+		pointsta = UINT8_MAX;
 		for (ipoint = 0; ipoint < ppt->nt; ++ipoint) {
 			ppoint = ppt->points+ipoint;
 			if (((ppoint->seconds > sec) ?
 			(ppoint->seconds-sec) : (sec-ppoint->seconds)) < WR_CPT_SECDIFFMAX) {
 				++npoint;
-				if (!pointsta)
+				if (UINT8_MAX == pointsta)
 					pointsta = ipoint;
 			}
 		}
