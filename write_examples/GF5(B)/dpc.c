@@ -1134,7 +1134,8 @@ static uint32_t pairdpc(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_dp
 	const uint16_t rowlimit = dpcst->nrow-1,
 	               collimit = dpcst->ncol-1;
 	const float rowcoef = rowlimit / 2.f / WR_CPT_LATLIM_MAX,
-	            colcoef = collimit / 2.f / WR_CPT_LONLIM_MAX;
+	            colmid  = dpcst->ncol / 2.f;
+	            colcoef = colmid / WR_CPT_LONLIM_MAX;
 	
 	ptxcount = 0;
 	*pairpx  = NULL;
@@ -1142,7 +1143,17 @@ static uint32_t pairdpc(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_dp
 	for (ipt = 0; ipt < ptcount; ++ipt) {
 		ppt = allpt+ipt;
 		row = rowcoef * (WR_CPT_LATLIM_MAX-ppt->lat);
-		col = colcoef * (WR_CPT_LONLIM_MAX+ppt->lon);
+		col = colmid + colcoef * ppt->lon * cos(M_PI * ppt->lat / 180);
+		
+		/*  Column number may(but WHY ?)
+		 *  1) less than 0, then overflow to extreme big number
+		 *  2) greater than right border
+		 */
+		if (col > UINT16_MAX-1)
+			col = 0;
+		else if (col > collimit)
+			col = collimit;
+		
 		idx = (uint32_t) row * dpcst->ncol + col;
 		
 		if (WR_CPT_INVALIDGEO(dpcst->lon[idx], dpcst->lat[idx]))
