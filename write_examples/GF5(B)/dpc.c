@@ -1134,7 +1134,7 @@ static uint32_t pairdpc(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_dp
 	const uint16_t rowlimit = dpcst->nrow-1,
 	               collimit = dpcst->ncol-1;
 	const float rowcoef = rowlimit / 2.f / WR_CPT_LATLIM_MAX,
-	            colmid  = dpcst->ncol / 2.f;
+	            colmid  = dpcst->ncol / 2.f,
 	            colcoef = colmid / WR_CPT_LONLIM_MAX;
 	
 	ptxcount = 0;
