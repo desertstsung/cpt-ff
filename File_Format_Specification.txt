@@ -15,14 +15,13 @@ File format hierarchy:
        minor version. e.g. 10000110 corresponds version 8.6
     -Count of Ptx(ns):
        4 bytes unsigned integer indicating number of Ptx,
-       which is the fundamental component of Data,
-       described in L24.
+       which is the fundamental component of Data(L22).
     -Count of parameters per Point(np):
        1 byte unsigned integer indicating number of params
-       inside Point, described in L34.
+       inside Point(L33).
   -Data: *Consists of [ns] Ptx.
     -Ptx:
-      -Pt: *Point may be multiple according to nt.
+      -Pt: *Point may be multiple according to nt(L30).
         -Geolocation:
            4 bytes single floating point number of
            longitude and 4 bytes single floating point
@@ -33,14 +32,15 @@ File format hierarchy:
            Point, described below.
         -Point: *Param may be multiple according to np.
           -Datetime:
-             8 bytes unsigned integer indicating the seconds
+             8 bytes unsigned integer indicating seconds
              elapsed since the Epoch(1/Jan/1970T00:00)
           -Param:
              8 bytes double floating point number.
-      -Px: *Vicinity may be multiple according to nv(L71).
+      -Px: *Vicinity may be multiple according to nv(L76).
         -Datetime:
-           Same as that in Point(L35).
+           Same as that in Point(L34).
         -Pixel: *Channel may be multiple due to nc(L50).
+                *Extra may be multiple due to ne(L71).
           -Geolocation:
              format like Geolocation in Pt, as well as an
              extra 1 byte unsigned integer indicating
@@ -68,10 +68,18 @@ File format hierarchy:
                followed by viewing zenithal angles, solar
                azimuthal angles, and viewing azimuthal
                angles with similar format.
-        -Count of valid nearby pixels(nv):
+          -Count of Extra info(ne):
+             1 byte unsigned integer indicating number of
+             Extra info of parent Pixel.
+          -Extra:
+             8 bytes floating point number.
+        -Count of valid nearby Pixels(nv):
            1 byte unsigned integer indicating number of
            valid Pixels around the centre Pixel.
         -Vicinity:
-           Same as Pixel.
+           Same as Pixel(L42).
   -Ending: 16 bytes of zeros indicating EOF
 
+Magick usage prompt from dev:
+nl(L52) may be set to 0 in order to store retrieval data
+exclusively, into Extra data space(L74).
