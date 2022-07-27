@@ -3,7 +3,7 @@
  *descreption:
  *  read cpt format file
  *init date: May/10/2022
- *last modify: May/19/2022
+ *last modify: Jul/27/2022
  *
  */
 
@@ -128,9 +128,6 @@ int cpt_readall(const char *fname, struct cpt_ptx *ptx, uint32_t *nptx, uint8_t 
 
 int readpixel(int filedes, struct cpt_pixel *pixel)
 {
-	size_t angsize, _obssize, obssize;
-	struct cpt_channel *pchannel;
-
 	/*  Geolocation  */
 	read(filedes, &pixel->lon, _cpt_4byte);
 	read(filedes, &pixel->lat, _cpt_4byte);
@@ -140,21 +137,39 @@ int readpixel(int filedes, struct cpt_pixel *pixel)
 	/*  Dimensions  */
 	read(filedes, &pixel->nchannel, _cpt_1byte);
 	read(filedes, &pixel->nlayer, _cpt_1byte);
-	angsize = sizeof(double[pixel->nlayer][4]);
-	_obssize = sizeof(double[pixel->nlayer]);
 	
-	/*  Channel  */
-	pixel->channels = malloc(sizeof(struct cpt_channel[pixel->nchannel]));
-	for (uint8_t ichannel = 0; ichannel < pixel->nchannel; ++ichannel) {
-		pchannel = pixel->channels+ichannel;
-		read(filedes, &pchannel->centrewv, _cpt_2byte);
+	if (pixel->nchannel) {
+		size_t angsize = sizeof(double[pixel->nlayer][4]);
+		size_t _obssize = sizeof(double[pixel->nlayer]);
 		
-		pchannel->obs = malloc(obssize = _obssize*((pchannel->centrewv < 0) ? 3 : 1));
-		read(filedes, pchannel->obs, obssize);
-		pchannel->ang = malloc(angsize);
-		read(filedes, pchannel->ang, angsize);
+		/*  Channel  */
+		size_t obssize;
+		struct cpt_channel *pchannel;
+		pixel->channels = malloc(sizeof(struct cpt_channel[pixel->nchannel]));
+		for (uint8_t ichannel = 0; ichannel < pixel->nchannel; ++ichannel) {
+			pchannel = pixel->channels+ichannel;
+			read(filedes, &pchannel->centrewv, _cpt_2byte);
+			
+			pchannel->obs = malloc(obssize = _obssize*((pchannel->centrewv < 0) ? 3 : 1));
+			read(filedes, pchannel->obs, obssize);
+			pchannel->ang = malloc(angsize);
+			read(filedes, pchannel->ang, angsize);
+		}
+		pchannel = NULL;
+	} else {
+		pixel->nlayer = 0;
+		pixel->channels = NULL;
 	}
-	pchannel = NULL;
+	
+	read(filedes, &pixel->nextra, _cpt_1byte);
+	if (pixel->nextra) {
+		pixel->extra = malloc(sizeof(double[pixel->nextra]));
+		for (uint8_t iextra = 0; iextra < pixel->nextra; ++iextra) {
+			read(filedes, pixel->extra+iextra, _cpt_8byte);
+		}
+	} else {
+		pixel->extra = NULL;
+	}
 
 	return 0;
 }
@@ -229,8 +244,10 @@ int cpt_freechannelall(struct cpt_channel **p, uint16_t n)
 int cpt_freepixelall(struct cpt_pixel **p, uint16_t n)
 {
 	if (*p) {
-		while (n-- > 0)
+		while (n-- > 0) {
 			cpt_freechannelall(&(*p+n)->channels, (*p+n)->nchannel);
+			CPT_FREE((*p+n)->extra);
+		}
 		CPT_FREE(*p);
 	}
 	

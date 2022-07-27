@@ -1,7 +1,7 @@
 /*
  *file: read/readcpt.h
  *init date: May/10/2022
- *last modify: May/19/2022
+ *last modify: Jul/27/2022
  *
  */
 
@@ -53,9 +53,11 @@ struct cpt_pixel {
 	uint8_t mask;
 	uint8_t nchannel;
 	uint8_t nlayer;
+	uint8_t nextra;
 	int16_t alt;
 	float   lat;
 	float   lon;
+	double *extra;
 	struct  cpt_channel *channels;
 };
 #define CPT_PIXELSIZE (sizeof(struct cpt_pixel))

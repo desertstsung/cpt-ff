@@ -18,8 +18,6 @@ static PyObject *cpt_readall_py(PyObject *self, PyObject *args)
 	struct cpt_pixel *ppixel;
 	PyObject *retlist,
 	         *ptxdict,
-	         *ptdict,
-	         *pxdict,
 	         *pointlist,
 	         *pointdict,
 	         *datalist,     /*  data of site parameters  */
@@ -41,7 +39,6 @@ static PyObject *cpt_readall_py(PyObject *self, PyObject *args)
 		
 		/*  Pt  */
 		ppt = ptx.pt+iptx;
-		ptdict = PyDict_New();
 		pointlist = PyList_New(ppt->nt);
 		for (ipoint = 0; ipoint < ppt->nt; ++ipoint) {
 			ppoint = ppt->points+ipoint;
@@ -57,20 +54,19 @@ static PyObject *cpt_readall_py(PyObject *self, PyObject *args)
 			
 			PyList_SetItem(pointlist, ipoint, pointdict);
 		}
-		PyDict_SetItemString(ptdict, "point", pointlist);
-		PyDict_SetItemString(ptdict, "lon", PyFloat_FromDouble(ppt->lon));
-		PyDict_SetItemString(ptdict, "lat", PyFloat_FromDouble(ppt->lat));
-		PyDict_SetItemString(ptdict, "alt", PyLong_FromLong(ppt->alt));
+		PyDict_SetItemString(ptxdict, "pt", pointlist);
+		PyDict_SetItemString(ptxdict, "ptlon", PyFloat_FromDouble(ppt->lon));
+		PyDict_SetItemString(ptxdict, "ptlat", PyFloat_FromDouble(ppt->lat));
+		PyDict_SetItemString(ptxdict, "ptalt", PyLong_FromLong(ppt->alt));
 		
 		/*  Px  */
 		ppx = ptx.px+iptx;
-		pxdict = PyDict_New();
-		PyDict_SetItemString(pxdict, "time", PyLong_FromLongLong(ppx->seconds));
+		PyDict_SetItemString(ptxdict, "pxtime", PyLong_FromLongLong(ppx->seconds));
 		
 		ppixel = ppx->centrepixel;
 		pixeldict = PyDict_New();
 		setpixeldict(pixeldict, ppixel);
-		PyDict_SetItemString(pxdict, "center", pixeldict);
+		PyDict_SetItemString(ptxdict, "pxcenter", pixeldict);
 		
 		vicilist = PyList_New(ppx->nvicinity);
 		for (ivicinity = 0; ivicinity < ppx->nvicinity; ++ivicinity) {
@@ -80,10 +76,8 @@ static PyObject *cpt_readall_py(PyObject *self, PyObject *args)
 			
 			PyList_SetItem(vicilist, ivicinity, pixeldict);
 		}
-		PyDict_SetItemString(pxdict, "vicinity", vicilist);
+		PyDict_SetItemString(ptxdict, "pxnear", vicilist);
 		
-		PyDict_SetItemString(ptxdict, "pt", ptdict);
-		PyDict_SetItemString(ptxdict, "px", pxdict);
 		PyList_SetItem(retlist, iptx, ptxdict);
 	}
 	
@@ -97,14 +91,18 @@ static PyObject *cpt_readall_py(PyObject *self, PyObject *args)
 
 static int setpixeldict(PyObject *pixeldict, struct cpt_pixel *ppixel)
 {
-	uint8_t  ilayer;
-	PyObject *banddict, *channeldict, *satlist;
+	uint8_t ilayer;
+	PyObject *satlist;
 	struct cpt_channel *pchannel;
+	char *keyname = NULL;
+	int16_t wv;
 	
-	banddict = PyDict_New();
 	for (uint8_t ichannel = 0; ichannel < ppixel->nchannel; ++ichannel) {
 		pchannel = ppixel->channels+ichannel;
-		channeldict = PyDict_New();
+		if (pchannel->centrewv > 0)
+			wv = pchannel->centrewv;
+		else
+			wv = -pchannel->centrewv;
 		
 		/*  I  */
 		satlist = PyList_New(ppixel->nlayer);
@@ -112,7 +110,8 @@ static int setpixeldict(PyObject *pixeldict, struct cpt_pixel *ppixel)
 			PyList_SetItem(satlist, ilayer,
 			               PyFloat_FromDouble(pchannel->obs[ilayer]));
 		}
-		PyDict_SetItemString(channeldict, "I", satlist);
+		asprintf(&keyname, "I%d", wv);
+		PyDict_SetItemString(pixeldict, keyname, satlist);
 		
 		/*  Q and U  */
 		if (pchannel->centrewv < 0) {
@@ -121,14 +120,16 @@ static int setpixeldict(PyObject *pixeldict, struct cpt_pixel *ppixel)
 				PyList_SetItem(satlist, ilayer-ppixel->nlayer,
 					       PyFloat_FromDouble(pchannel->obs[ilayer]));
 			}
-			PyDict_SetItemString(channeldict, "Q", satlist);
+			asprintf(&keyname, "Q%d", wv);
+			PyDict_SetItemString(pixeldict, keyname, satlist);
 			
 			satlist = PyList_New(ppixel->nlayer);
 			for (ilayer = 2*ppixel->nlayer; ilayer < 3*ppixel->nlayer; ++ilayer) {
 				PyList_SetItem(satlist, ilayer-2*ppixel->nlayer,
 					       PyFloat_FromDouble(pchannel->obs[ilayer]));
 			}
-			PyDict_SetItemString(channeldict, "U", satlist);
+			asprintf(&keyname, "U%d", wv);
+			PyDict_SetItemString(pixeldict, keyname, satlist);
 		}
 		
 		/*  sz/vz/sa/va  */
@@ -137,39 +138,46 @@ static int setpixeldict(PyObject *pixeldict, struct cpt_pixel *ppixel)
 			PyList_SetItem(satlist, ilayer,
 			               PyFloat_FromDouble(pchannel->ang[ilayer]));
 		}
-		PyDict_SetItemString(channeldict, "sza", satlist);
+		asprintf(&keyname, "sza%d", wv);
+		PyDict_SetItemString(pixeldict, keyname, satlist);
 		
 		satlist = PyList_New(ppixel->nlayer);
 		for (ilayer = ppixel->nlayer; ilayer < 2*ppixel->nlayer; ++ilayer) {
 			PyList_SetItem(satlist, ilayer-ppixel->nlayer,
 			               PyFloat_FromDouble(pchannel->ang[ilayer]));
 		}
-		PyDict_SetItemString(channeldict, "vza", satlist);
+		asprintf(&keyname, "vza%d", wv);
+		PyDict_SetItemString(pixeldict, keyname, satlist);
 		
 		satlist = PyList_New(ppixel->nlayer);
 		for (ilayer = 2*ppixel->nlayer; ilayer < 3*ppixel->nlayer; ++ilayer) {
 			PyList_SetItem(satlist, ilayer-2*ppixel->nlayer,
 			               PyFloat_FromDouble(pchannel->ang[ilayer]));
 		}
-		PyDict_SetItemString(channeldict, "saa", satlist);
+		asprintf(&keyname, "saa%d", wv);
+		PyDict_SetItemString(pixeldict, keyname, satlist);
 		
 		satlist = PyList_New(ppixel->nlayer);
 		for (ilayer = 3*ppixel->nlayer; ilayer < 4*ppixel->nlayer; ++ilayer) {
 			PyList_SetItem(satlist, ilayer-3*ppixel->nlayer,
 			               PyFloat_FromDouble(pchannel->ang[ilayer]));
 		}
-		PyDict_SetItemString(channeldict, "vaa", satlist);
-		
-		PyDict_SetItem(banddict,
-		               PyLong_FromLong(Py_ABS(pchannel->centrewv)), channeldict);
+		asprintf(&keyname, "vaa%d", wv);
+		PyDict_SetItemString(pixeldict, keyname, satlist);
 	}
-	PyDict_SetItemString(pixeldict, "band", banddict);
 	
 	PyDict_SetItemString(pixeldict, "lon", PyFloat_FromDouble(ppixel->lon));
 	PyDict_SetItemString(pixeldict, "lat", PyFloat_FromDouble(ppixel->lat));
 	PyDict_SetItemString(pixeldict, "alt", PyLong_FromLong(ppixel->alt));
-	PyDict_SetItemString(pixeldict, "flag", PyLong_FromLong(ppixel->mask));
+	PyDict_SetItemString(pixeldict, "mask", PyLong_FromLong(ppixel->mask));
 	
+	PyObject *extralist = PyList_New(ppixel->nextra);
+	for (uint8_t iextra = 0; iextra < ppixel->nextra; ++iextra) {
+		PyList_SetItem(extralist, iextra, PyFloat_FromDouble(ppixel->extra[iextra]));
+	}
+	PyDict_SetItemString(pixeldict, "extra", extralist);
+	
+	CPT_FREE(keyname);
 	return 0;
 }
 

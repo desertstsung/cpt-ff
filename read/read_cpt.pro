@@ -2,7 +2,7 @@
 ; :Description:
 ;    IDL interface for reading cpt file format file
 ; :Version:
-;    v0.1 # init: May/23/2022 last modify May/23/2022
+;    v0.1 # init: May/23/2022 last modify Jul/27/2022
 ; :Params: fname
 ; :Keywords:
 ;    nptx:   variable receiving the value of count of Ptx
@@ -118,5 +118,11 @@ function readpixel, lun
 			channels[ichannel] = {i: i, sza: sza, vza: vza, saa: saa, vaa: vaa}
 	endfor
 	
-	RETURN, {lon: lon, lat: lat, alt: alt, mask: mask, bands: channels}
+	READU, lun, (nextra = 0B)
+	if nextra then begin
+		READU, lun, (extra = MAKE_ARRAY(nextra, /DOUBLE))
+		RETURN, {lon: lon, lat: lat, alt: alt, mask: mask, bands: channels, extra: extra}
+	endif else begin
+		RETURN, {lon: lon, lat: lat, alt: alt, mask: mask, bands: channels}
+	endelse
 end

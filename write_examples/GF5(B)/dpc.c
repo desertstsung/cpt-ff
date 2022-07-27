@@ -5,7 +5,7 @@
  *syntax:
  *  a.out DPC_prefix [ptxt, [cpt]]
  *init date: May/27/2022
- *last modify: Jun/1/2022
+ *last modify: JuL/27/2022
  *
  */
 
@@ -1067,6 +1067,44 @@ static int loadchannelp(struct wr_cpt_dpc *st, struct wr_cpt_dpcbandp *pb, struc
 	return 0;
 }
 
+/*  Landtype embed  */
+static uint8_t loadigbpfromindex(uint32_t idx, uint8_t *landtype)
+{
+	int fd;
+	uint16_t ntag, tagid;
+	uint32_t pos;
+	static uint32_t posfound = 0;
+	
+	if ((fd = open("surfacetype.tif", O_RDONLY)) < 0)
+		return 0;
+	
+	if (posfound) {
+		pos = posfound;
+		goto success;
+	}
+	
+	pread(fd, &pos, 4, 4);  /*  Offset of IFD  */
+	lseek(fd, pos, SEEK_SET);
+	read(fd, &ntag, 2);  /*  Count of entry  */
+	for (uint16_t i = 0; i < ntag; ++i) {
+		read(fd, &tagid, 2);
+		if (273 == tagid) {  /*  273 stands for instance data offset tag ID  */
+			lseek(fd, 6, SEEK_CUR);
+			read(fd, &pos, 4);
+			posfound = pos;
+			goto success;
+		}
+		lseek(fd, 10, SEEK_CUR);
+	}
+	close(fd);
+	return 0;
+	
+	success:
+	pread(fd, landtype, 1, pos+idx);
+	close(fd);
+	return 1;
+}
+
 /*  Load certain location DPC pixel  */
 static int loadpxfromst(struct cpt_pixel *pixel, struct wr_cpt_dpc *st, uint16_t ir, uint16_t ic)
 {
@@ -1112,6 +1150,16 @@ static int loadpxfromst(struct cpt_pixel *pixel, struct wr_cpt_dpc *st, uint16_t
 	}
 	
 	pchannel = NULL;
+	
+	/*  IGBP  */
+	uint8_t landtype;
+	pixel->nextra = loadigbpfromindex(idx, &landtype);
+	if (pixel->nextra) {
+		pixel->extra = malloc(_cpt_8byte);
+		*pixel->extra = landtype;
+	} else {
+		pixel->extra = NULL;
+	}
 
 	return 0;
 }
@@ -1286,6 +1334,11 @@ static int writepixel(int filedes, struct cpt_pixel *pixel)
 		safewrite(filedes, pchannel->ang, sizeof(double[pixel->nlayer][4]));
 	}
 	pchannel = NULL;
+	
+	/*  Extra  */
+	safewrite(filedes, &pixel->nextra, _cpt_1byte);
+	if (pixel->nextra)
+		safewrite(filedes, pixel->extra, _cpt_8byte*pixel->nextra);
 
 	return 0;
 }
@@ -1406,9 +1459,10 @@ int wrcpt(const char *prefix, const char *ptxtfname, const char *cptfname)
 	ptxcount = pairdpc(allpt, ptcount, dpcst, &pairpx, &pairpt);
 #ifdef CPT_DEBUG
 	for (uint32_t i = 0; i < ptxcount; ++i) {
-		CPT_ECHOWITHTIME("No.%03d: lon %9.4f lat %8.4f with %2d points",
-		                 i+1, (pairpx+i)->centrepixel->lon,
-		                 (pairpx+i)->centrepixel->lat, (pairpt+i)->nt);
+		CPT_ECHOWITHTIME("No.%03d: lon %9.4f lat %8.4f (%2.0f) with %2d points",
+		                 i+1, (pairpx+i)->centrepixel->lon, (pairpx+i)->centrepixel->lat,
+		                 (pairpx+i)->centrepixel->nextra ? *(pairpx+i)->centrepixel->extra : -1,
+		                 (pairpt+i)->nt);
 	}
 #endif
 	
