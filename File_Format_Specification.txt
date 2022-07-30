@@ -18,10 +18,12 @@ File format hierarchy:
        which is the fundamental component of Data(L22).
     -Count of parameters per Point(np):
        1 byte unsigned integer indicating number of params
-       inside Point(L33).
+       inside Point(L35).
   -Data: *Consists of [ns] Ptx.
     -Ptx:
-      -Pt: *Point may be multiple according to nt(L30).
+      -Pt: *Point may be multiple according to nt(L32).
+        -Name:
+           variable length characters with ending '\0'.
         -Geolocation:
            4 bytes single floating point number of
            longitude and 4 bytes single floating point
@@ -36,11 +38,11 @@ File format hierarchy:
              elapsed since the Epoch(1/Jan/1970T00:00)
           -Param:
              8 bytes double floating point number.
-      -Px: *Vicinity may be multiple according to nv(L76).
+      -Px: *Vicinity may be multiple according to nv(L78).
         -Datetime:
-           Same as that in Point(L34).
-        -Pixel: *Channel may be multiple due to nc(L50).
-                *Extra may be multiple due to ne(L71).
+           Same as that in Point(L36).
+        -Pixel: *Channel may be multiple due to nc(L52).
+                *Extra may be multiple due to ne(L73).
           -Geolocation:
              format like Geolocation in Pt, as well as an
              extra 1 byte unsigned integer indicating
@@ -77,9 +79,9 @@ File format hierarchy:
            1 byte unsigned integer indicating number of
            valid Pixels around the centre Pixel.
         -Vicinity:
-           Same as Pixel(L42).
+           Same as Pixel(L44).
   -Ending: 16 bytes of zeros indicating EOF
 
 Magick usage prompt from dev:
-nl(L52) may be set to 0 in order to store retrieval data
-exclusively, into Extra data space(L74).
+nl(L54) may be set to 0 in order to store retrieval data
+exclusively, into Extra data space(L76).
