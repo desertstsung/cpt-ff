@@ -1477,11 +1477,11 @@ int wrcpt(const char *prefix, const char *ptxtfname, const char *cptfname)
 	ptxcount = pairdpc(allpt, ptcount, dpcst, &pairpx, &pairpt);
 #ifdef CPT_DEBUG
 	for (uint32_t i = 0; i < ptxcount; ++i) {
-		CPT_ECHOWITHTIME("No.%03d (%20s): lon %9.4f lat %8.4f (%2.0f) with %2d points",
-		                 i+1, (pairpt+i)->name,
+		CPT_ECHOWITHTIME("No.%03d: pixel [%9.4f, %8.4f] (%2.0f) with %2d points at %s",
+		                 i+1,
 		                 (pairpx+i)->centrepixel->lon, (pairpx+i)->centrepixel->lat,
 		                 (pairpx+i)->centrepixel->nextra ? *(pairpx+i)->centrepixel->extra : -1,
-		                 (pairpt+i)->nt);
+		                 (pairpt+i)->nt, (pairpt+i)->name);
 	}
 #endif
 	
