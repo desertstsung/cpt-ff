@@ -55,6 +55,7 @@ static PyObject *cpt_readall_py(PyObject *self, PyObject *args)
 			PyList_SetItem(pointlist, ipoint, pointdict);
 		}
 		PyDict_SetItemString(ptxdict, "pt", pointlist);
+		PyDict_SetItemString(ptxdict, "ptname", Py_BuildValue("s", ppt->name));
 		PyDict_SetItemString(ptxdict, "ptlon", PyFloat_FromDouble(ppt->lon));
 		PyDict_SetItemString(ptxdict, "ptlat", PyFloat_FromDouble(ppt->lat));
 		PyDict_SetItemString(ptxdict, "ptalt", PyLong_FromLong(ppt->alt));

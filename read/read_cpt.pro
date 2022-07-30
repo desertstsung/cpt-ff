@@ -51,6 +51,16 @@ function cpt_readall, fname, nptx=ptxcount, nparam=paramcount
 	for iptx = 0UL, ptxcount-1 do begin
 		
 		;Pt
+		
+		name = []
+		while (1) do begin
+			READU, lun, (namec = 0B)
+			if namec eq 0 then $
+				break $
+			else $
+				name = [name, namec]
+		endwhile
+		
 		READU, lun, (lon = 0.)
 		READU, lun, (lat = 0.)
 		READU, lun, (alt = 0US)
@@ -61,7 +71,7 @@ function cpt_readall, fname, nptx=ptxcount, nparam=paramcount
 			READU, lun, (param = MAKE_ARRAY(paramcount, /DOUBLE))
 			points[ipoint] = {time: time, data: param}
 		endfor
-		pt = {lon: lon, lat: lat, alt: alt, point: points}
+		pt = {lon: lon, lat: lat, alt: alt, point: points, name: STRING(name)}
 		
 		;Px
 		READU, lun, (time = FIX(0, TYPE=15))

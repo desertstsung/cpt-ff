@@ -28,9 +28,10 @@ int main(int argc, char *argv[])
 	
 	cpt_readall(argv[1], &ptx, &nptx, &nparam);
 	for (uint16_t i = 0; i < nptx; ++i) {
-		printf("No.%03d: lon %9.4f lat %8.4f with %2d points\n",
+		printf("No.%03d: lon %9.4f lat %8.4f with %2d points (%s)\n",
 		       i+1, (ptx.px+i)->centrepixel->lon,
-		       (ptx.px+i)->centrepixel->lat, (ptx.pt+i)->nt);
+		       (ptx.px+i)->centrepixel->lat, (ptx.pt+i)->nt,
+		       (ptx.pt+i)->name);
 	}
 	
 	cpt_freeptall(&ptx.pt, nptx);
@@ -82,10 +83,21 @@ int cpt_readall(const char *fname, struct cpt_ptx *ptx, uint32_t *nptx, uint8_t 
 	ptx->px = malloc(sizeof(struct cpt_px[*nptx]));
 	
 	/*  Data  */
+	char namec;
+	uint8_t namelen; // Assume all name is shorter than 255 characters.
 	for (iptx = 0; iptx < *nptx; ++iptx) {
 		
 		/*  Pt  */
 		ppt = ptx->pt+iptx;
+		
+		ppt->name = NULL;
+		namelen = 0;
+		while (read(fd, &namec, _cpt_1byte) && (namec != '\0') && (++namelen)) {
+			ppt->name = realloc(ppt->name, namelen+1);
+			ppt->name[namelen-1] = namec;
+			ppt->name[namelen] = '\0';
+		}
+		
 		read(fd, &ppt->lon, _cpt_4byte);
 		read(fd, &ppt->lat, _cpt_4byte);
 		read(fd, &ppt->alt, _cpt_2byte);
@@ -216,8 +228,10 @@ int cpt_freepointall(struct cpt_point **p, uint16_t n)
 int cpt_freeptall(struct cpt_pt **p, uint32_t n)
 {
 	if (*p) {
-		while (n-- > 0)
+		while (n-- > 0) {
 			cpt_freepointall(&(*p+n)->points, (*p+n)->nt);
+			CPT_FREE((*p+n)->name);
+		}
 		CPT_FREE(*p);
 	}
 	

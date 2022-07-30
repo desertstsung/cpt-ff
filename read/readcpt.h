@@ -80,6 +80,7 @@ struct cpt_pt {
 	int16_t alt;
 	float   lon;
 	float   lat;
+	char   *name;
 	struct cpt_point *points;
 };
 

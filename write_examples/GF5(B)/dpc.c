@@ -871,6 +871,7 @@ static int querysda(const char *fname, struct cpt_pt **allpt, uint32_t *ptcount)
 	*ptcount = 0;
 	
 	/*  Handle each line  */
+	char ptname[UINT8_MAX+1];
 	do {
 		while (*++pbuf != '\n') ;
 		
@@ -882,8 +883,10 @@ static int querysda(const char *fname, struct cpt_pt **allpt, uint32_t *ptcount)
 		/*  End of records  */
 		if ('<' == *line) break;
 		
+		memset(ptname, 0, UINT8_MAX+1);
+		
 		/*  Read info into stack  */
-		sscanf(line, "%*[^','],"
+		sscanf(line, "%[^','],"          /*  X.read pt name  */
 		             "%[^','],%[^','],"  /*  A.read date time  */
 		             "%*[^','],%*[^','],"
 		             "%lf,%lf,"          /*  B.read total and fine AOD500  */
@@ -901,6 +904,7 @@ static int querysda(const char *fname, struct cpt_pt **allpt, uint32_t *ptcount)
 		             
 		             "%f,%f,%hd",        /*  E.read geolocation  */
 		             
+		             ptname,                         /*  X.receive  */
 		             rcddate, rcdtime,               /*  A.receive  */
 		             tparams, tparams+1,             /*  B.receive  */
 		             tparams+2,                      /*  C.receive  */
@@ -918,6 +922,10 @@ static int querysda(const char *fname, struct cpt_pt **allpt, uint32_t *ptcount)
 			ppt->lon = lon;
 			ppt->lat = lat;
 			ppt->alt = alt;
+			
+			ppt->name = malloc(strlen(ptname)+1);
+			memcpy(ppt->name, ptname, strlen(ptname));
+			ppt->name[strlen(ptname)] = '\0';
 			
 			ppt->points = malloc(CPT_POINTSIZE);
 			ppoint = ppt->points;
@@ -1227,6 +1235,11 @@ static uint32_t pairdpc(struct cpt_pt *allpt, uint32_t ptcount, struct wr_cpt_dp
 		/*  Pt  */
 		*pairpt = realloc(*pairpt, sizeof(struct cpt_pt[++ptxcount]));
 		ppairpt = *pairpt + ptxcount-1;
+		
+		ppairpt->name = malloc(strlen(ppt->name)+1);
+		memcpy(ppairpt->name, ppt->name, strlen(ppt->name));
+		ppairpt->name[strlen(ppt->name)] = '\0';
+		
 		ppairpt->nt  = npoint;
 		ppairpt->alt = ppt->alt;
 		ppairpt->lon = ppt->lon;
@@ -1373,10 +1386,15 @@ static int writecpttofile(const char *fname, struct cpt_ff *st)
 	safewrite(fd, &st->hdr->nparam, _cpt_1byte);
 	
 	/*  Data/Ptx  */
+	char strend = '\0';
 	for (iptx = 0; iptx < st->hdr->nptx; ++iptx) {
 		
 		/*  Pt  */
 		ppt = st->data->pt+iptx;
+		
+		safewrite(fd, ppt->name, strlen(ppt->name));
+		safewrite(fd, &strend, _cpt_1byte);
+		
 		safewrite(fd, &ppt->lon, _cpt_4byte);
 		safewrite(fd, &ppt->lat, _cpt_4byte);
 		safewrite(fd, &ppt->alt, _cpt_2byte);
@@ -1459,8 +1477,9 @@ int wrcpt(const char *prefix, const char *ptxtfname, const char *cptfname)
 	ptxcount = pairdpc(allpt, ptcount, dpcst, &pairpx, &pairpt);
 #ifdef CPT_DEBUG
 	for (uint32_t i = 0; i < ptxcount; ++i) {
-		CPT_ECHOWITHTIME("No.%03d: lon %9.4f lat %8.4f (%2.0f) with %2d points",
-		                 i+1, (pairpx+i)->centrepixel->lon, (pairpx+i)->centrepixel->lat,
+		CPT_ECHOWITHTIME("No.%03d (%20s): lon %9.4f lat %8.4f (%2.0f) with %2d points",
+		                 i+1, (pairpt+i)->name,
+		                 (pairpx+i)->centrepixel->lon, (pairpx+i)->centrepixel->lat,
 		                 (pairpx+i)->centrepixel->nextra ? *(pairpx+i)->centrepixel->extra : -1,
 		                 (pairpt+i)->nt);
 	}
